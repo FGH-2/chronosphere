@@ -1,0 +1,45 @@
+category = "rdp"
+display_name = "RDP"
+icon = ""
+order = 60
+
+[[command]]
+id = "rdp.nxc.checkauth"
+title = "nxc rdp — verify creds"
+template = "nxc rdp {target} {nxc_auth}"
+requires = ["nxc"]
+tags = ["enum", "nxc"]
+
+[[command]]
+id = "rdp.xfreerdp"
+title = "xfreerdp (password)"
+template = "xfreerdp /v:{target} /u:'{user}' /p:'{password}' /d:'{domain}' /dynamic-resolution /clipboard +clipboard"
+requires = ["xfreerdp"]
+tags = ["shell", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "rdp.xfreerdp.hash"
+title = "xfreerdp (Pass-the-Hash)"
+template = "xfreerdp /v:{target} /u:'{user}' /pth:'{nt_hash}' /d:'{domain}' /dynamic-resolution"
+requires = ["xfreerdp"]
+tags = ["shell", "interactive", "pth"]
+interactive = true
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "rdp.rdesktop"
+title = "rdesktop"
+template = "rdesktop -u '{user}' -p '{password}' -d '{domain}' {target}"
+requires = ["rdesktop"]
+tags = ["shell", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "rdp.crowbar"
+title = "crowbar (RDP brute)"
+template = "crowbar -b rdp -s {target}/32 -U users.txt -C passwords.txt"
+requires = ["crowbar"]
+tags = ["brute", "noisy"]

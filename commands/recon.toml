@@ -1,0 +1,60 @@
+category = "recon"
+display_name = "Recon"
+icon = ""
+order = 10
+
+[[command]]
+id = "recon.nmap.fast_tcp"
+title = "nmap fast TCP top-1000"
+template = "nmap -sS -T4 -Pn --top-ports 1000 -sV {target}"
+requires = ["nmap"]
+tags = ["nmap", "tcp", "fast"]
+
+[[command]]
+id = "recon.nmap.full_tcp"
+title = "nmap full TCP scan + version + scripts"
+template = "nmap -sS -p- -T4 --min-rate 1000 -Pn -sV -sC -O -oA scans/full_tcp {target}"
+requires = ["nmap"]
+tags = ["nmap", "tcp", "full", "slow"]
+
+[[command]]
+id = "recon.nmap.udp_top"
+title = "nmap UDP top-100"
+template = "sudo nmap -sU -T4 --top-ports 100 -sV -Pn {target}"
+requires = ["nmap"]
+tags = ["nmap", "udp"]
+
+[[command]]
+id = "recon.nmap.vuln"
+title = "nmap with vuln scripts"
+template = "nmap -Pn -sV --script vuln {target}"
+requires = ["nmap"]
+tags = ["nmap", "vuln"]
+
+[[command]]
+id = "recon.rustscan.fast"
+title = "rustscan all ports + nmap follow-up"
+template = "rustscan -a {target} --ulimit 5000 -- -A -sC -sV"
+requires = ["rustscan"]
+tags = ["rustscan", "fast"]
+
+[[command]]
+id = "recon.masscan.tcp"
+title = "masscan all TCP ports"
+template = "sudo masscan -p1-65535 {target} --rate=10000 -e tun0"
+requires = ["masscan"]
+tags = ["masscan", "fast", "noisy"]
+
+[[command]]
+id = "recon.ping"
+title = "icmp sanity check"
+template = "ping -c 4 {target}"
+requires = ["ping"]
+tags = ["icmp", "sanity"]
+
+[[command]]
+id = "recon.traceroute"
+title = "traceroute"
+template = "traceroute {target}"
+requires = ["traceroute"]
+tags = ["network"]

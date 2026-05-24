@@ -1,0 +1,4 @@
+/target
+/engagements
+*.log
+.DS_Store

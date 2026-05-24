@@ -1,0 +1,77 @@
+category = "ssh"
+display_name = "SSH"
+icon = ""
+order = 77
+
+[[command]]
+id = "ssh.nxc.checkauth"
+title = "nxc ssh — verify"
+template = "nxc ssh {target} {nxc_auth}"
+requires = ["nxc"]
+tags = ["enum", "nxc"]
+
+[[command]]
+id = "ssh.connect"
+title = "ssh -i (key) or password"
+template = "ssh {user}@{target}"
+requires = ["ssh"]
+tags = ["shell", "interactive"]
+interactive = true
+
+[[command]]
+id = "ssh.connect.with_key"
+title = "ssh with key"
+template = "ssh -i /tmp/id_rsa {user}@{target}"
+requires = ["ssh"]
+tags = ["shell", "interactive"]
+interactive = true
+
+[[command]]
+id = "ssh.nmap.algos"
+title = "nmap ssh2-enum-algos"
+template = "nmap -p 22 --script=ssh2-enum-algos,ssh-auth-methods,ssh-hostkey {target}"
+requires = ["nmap"]
+tags = ["enum"]
+
+[[command]]
+id = "ssh.audit"
+title = "ssh-audit"
+template = "ssh-audit {target}"
+requires = ["ssh-audit"]
+tags = ["audit"]
+
+[[command]]
+id = "ssh.hydra.brute"
+title = "hydra ssh brute (slow)"
+template = "hydra -l {user} -P /usr/share/wordlists/rockyou.txt ssh://{target} -t 4"
+requires = ["hydra"]
+tags = ["brute", "noisy"]
+
+[[command]]
+id = "ssh.crackmapexec.spray"
+title = "nxc ssh — spray"
+template = "nxc ssh {target} -u users.txt -p 'Spring2025!' --continue-on-success"
+requires = ["nxc"]
+tags = ["spray", "noisy"]
+
+[[command]]
+id = "ssh.tunnel.local"
+title = "local port forward"
+template = "ssh -L 8080:127.0.0.1:80 {user}@{target}"
+requires = ["ssh"]
+tags = ["tunnel"]
+interactive = true
+
+[[command]]
+id = "ssh.tunnel.dynamic_socks"
+title = "dynamic SOCKS proxy"
+template = "ssh -D 1080 -N -f {user}@{target}"
+requires = ["ssh"]
+tags = ["tunnel", "socks"]
+
+[[command]]
+id = "ssh.john.passphrase"
+title = "ssh2john + john (private key passphrase)"
+template = "ssh2john /tmp/id_rsa > /tmp/id_rsa.hash && john --wordlist=/usr/share/wordlists/rockyou.txt /tmp/id_rsa.hash"
+requires = ["ssh2john", "john"]
+tags = ["crack"]

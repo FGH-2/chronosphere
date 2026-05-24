@@ -1,0 +1,64 @@
+category = "winrm"
+display_name = "WinRM"
+icon = ""
+order = 40
+
+[[command]]
+id = "winrm.nxc.checkauth"
+title = "nxc winrm — verify creds"
+template = "nxc winrm {target} {nxc_auth}"
+requires = ["nxc"]
+tags = ["enum", "nxc"]
+
+[[command]]
+id = "winrm.nxc.exec_whoami"
+title = "nxc winrm — `whoami /all`"
+template = "nxc winrm {target} {nxc_auth} -x 'whoami /all'"
+requires = ["nxc"]
+tags = ["exec"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "winrm.evil_winrm.plaintext"
+title = "evil-winrm (password)"
+template = "evil-winrm -i {target} -u '{user}' -p '{password}'"
+requires = ["evil-winrm"]
+tags = ["shell", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "winrm.evil_winrm.hash"
+title = "evil-winrm (NTLM hash / PtH)"
+template = "evil-winrm -i {target} -u '{user}' -H '{nt_hash}'"
+requires = ["evil-winrm"]
+tags = ["shell", "interactive", "pth"]
+interactive = true
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "winrm.evil_winrm.kerberos"
+title = "evil-winrm (kerberos)"
+template = "evil-winrm -i {target} -r {domain} --no-pass"
+requires = ["evil-winrm"]
+tags = ["shell", "interactive", "kerberos"]
+interactive = true
+when = "creds.kind == 'kerberos'"
+
+[[command]]
+id = "winrm.evil_winrm.scripts"
+title = "evil-winrm with PS scripts dir"
+template = "evil-winrm -i {target} -u '{user}' -p '{password}' -s /opt/PowerSploit/ -e /opt/binaries/"
+requires = ["evil-winrm"]
+tags = ["shell", "interactive", "scripts"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "winrm.ruby.winrm_shell"
+title = "ruby winrm-shell (alt)"
+template = "winrm-shell -i {target} -u '{user}' -p '{password}'"
+requires = ["winrm-shell"]
+tags = ["shell", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"

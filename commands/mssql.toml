@@ -1,0 +1,59 @@
+category = "mssql"
+display_name = "MSSQL"
+icon = ""
+order = 45
+
+[[command]]
+id = "mssql.nxc.checkauth"
+title = "nxc mssql — verify creds"
+template = "nxc mssql {target} {nxc_auth}"
+requires = ["nxc"]
+tags = ["enum", "nxc"]
+
+[[command]]
+id = "mssql.nxc.windows_auth"
+title = "nxc mssql — Windows auth"
+template = "nxc mssql {target} -u '{user}' -p '{password}' -d {domain} -w"
+requires = ["nxc"]
+tags = ["enum", "winauth"]
+when = "creds.kind == 'plaintext' and creds.has_domain"
+
+[[command]]
+id = "mssql.nxc.databases"
+title = "nxc mssql — list databases"
+template = "nxc mssql {target} {nxc_auth} -M mssql_priv"
+requires = ["nxc"]
+tags = ["enum"]
+
+[[command]]
+id = "mssql.nxc.xp_cmdshell"
+title = "nxc mssql — xp_cmdshell whoami"
+template = "nxc mssql {target} {nxc_auth} -x 'whoami'"
+requires = ["nxc"]
+tags = ["exec", "xp_cmdshell"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "mssql.impacket.client"
+title = "impacket-mssqlclient (SQL auth)"
+template = "impacket-mssqlclient '{user}':'{password}'@{target} -windows-auth"
+requires = ["impacket-mssqlclient"]
+tags = ["shell", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mssql.impacket.client_kerberos"
+title = "impacket-mssqlclient (kerberos)"
+template = "impacket-mssqlclient -k -no-pass '{user_at_domain}'@{target}"
+requires = ["impacket-mssqlclient"]
+tags = ["shell", "interactive", "kerberos"]
+interactive = true
+when = "creds.kind == 'kerberos'"
+
+[[command]]
+id = "mssql.linkedserver.enum"
+title = "nxc mssql — linked-server crawl"
+template = "nxc mssql {target} {nxc_auth} -M enum_links"
+requires = ["nxc"]
+tags = ["linked", "enum"]

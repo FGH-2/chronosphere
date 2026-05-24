@@ -1,0 +1,104 @@
+category = "cloud"
+display_name = "Cloud"
+icon = "󰒋"
+order = 92
+
+[[command]]
+id = "cloud.aws.whoami"
+title = "aws sts get-caller-identity"
+template = "aws sts get-caller-identity"
+requires = ["aws"]
+tags = ["aws"]
+
+[[command]]
+id = "cloud.aws.enum_account"
+title = "aws — enumerate account-wide quick info"
+template = "aws iam list-users --max-items 5; aws s3 ls; aws ec2 describe-instances --max-items 5"
+requires = ["aws"]
+tags = ["aws", "enum"]
+
+[[command]]
+id = "cloud.aws.s3.public_check"
+title = "check s3 bucket public"
+template = "aws s3api get-bucket-acl --bucket BUCKET_NAME"
+requires = ["aws"]
+tags = ["aws", "s3"]
+
+[[command]]
+id = "cloud.aws.assume_role"
+title = "aws assume-role"
+template = "aws sts assume-role --role-arn arn:aws:iam::ACCOUNT:role/NAME --role-session-name chrono"
+requires = ["aws"]
+tags = ["aws"]
+
+[[command]]
+id = "cloud.aws.pacu_session"
+title = "pacu new session"
+template = "pacu --new-session chrono"
+requires = ["pacu"]
+tags = ["aws", "tool"]
+interactive = true
+
+[[command]]
+id = "cloud.gcp.whoami"
+title = "gcloud auth list"
+template = "gcloud auth list"
+requires = ["gcloud"]
+tags = ["gcp"]
+
+[[command]]
+id = "cloud.gcp.projects"
+title = "gcloud projects list"
+template = "gcloud projects list"
+requires = ["gcloud"]
+tags = ["gcp"]
+
+[[command]]
+id = "cloud.az.whoami"
+title = "az account show"
+template = "az account show"
+requires = ["az"]
+tags = ["azure"]
+
+[[command]]
+id = "cloud.az.subscriptions"
+title = "az account list"
+template = "az account list -o table"
+requires = ["az"]
+tags = ["azure"]
+
+[[command]]
+id = "cloud.az.aadinternals"
+title = "AADInternals quick recon"
+template = "powershell -nop -c \"Import-Module AADInternals; Invoke-AADIntReconAsOutsider -DomainName {hostname}\""
+requires = ["powershell"]
+tags = ["azure", "entra"]
+
+[[command]]
+id = "cloud.az.roadrecon_auth"
+title = "roadrecon auth"
+template = "roadrecon auth -u '{user}@{domain}' -p '{password}'"
+requires = ["roadrecon"]
+tags = ["azure", "entra"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "cloud.az.roadrecon_gather"
+title = "roadrecon gather"
+template = "roadrecon gather"
+requires = ["roadrecon"]
+tags = ["azure", "entra"]
+
+[[command]]
+id = "cloud.imds.aws"
+title = "AWS IMDS v2 token grab"
+template = "TOKEN=$(curl -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600') && curl -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+requires = ["curl"]
+tags = ["aws", "ssrf", "imds"]
+
+[[command]]
+id = "cloud.imds.gcp"
+title = "GCP metadata grab"
+template = "curl -s -H 'Metadata-Flavor: Google' 'http://metadata.google.internal/computeMetadata/v1/?recursive=true&alt=text'"
+requires = ["curl"]
+tags = ["gcp", "ssrf", "imds"]

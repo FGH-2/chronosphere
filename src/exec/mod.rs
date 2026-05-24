@@ -1,0 +1,275 @@
+pub mod tmux;
+
+use crate::config::TMUX_SESSION;
+use crate::engagement::{Engagement, JobRecord, JobStatus};
+use anyhow::{Context, Result};
+use chrono::Utc;
+use std::fs;
+use std::path::PathBuf;
+use uuid::Uuid;
+
+#[derive(Debug, Clone)]
+pub struct SpawnRequest {
+    pub command_id: Option<String>,
+    pub command_title: String,
+    pub resolved: String,
+    pub interactive: bool,
+    pub target: Option<String>,
+    pub profile: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TmuxAvailability {
+    InSession,
+    SessionBootstrapped,
+    Unavailable,
+}
+
+pub struct Executor {
+    pub availability: TmuxAvailability,
+    pub jobs_dir: PathBuf,
+}
+
+impl Executor {
+    pub fn init(engagement: &Engagement) -> Self {
+        let jobs_dir = Engagement::jobs_dir(&engagement.dir);
+        fs::create_dir_all(&jobs_dir).ok();
+
+        let availability = if std::env::var("TMUX").is_ok() {
+            TmuxAvailability::InSession
+        } else if tmux::has_tmux() {
+            match tmux::ensure_session(TMUX_SESSION) {
+                Ok(_) => TmuxAvailability::SessionBootstrapped,
+                Err(err) => {
+                    tracing::warn!(?err, "could not bootstrap tmux session");
+                    TmuxAvailability::Unavailable
+                }
+            }
+        } else {
+            TmuxAvailability::Unavailable
+        };
+        Self {
+            availability,
+            jobs_dir,
+        }
+    }
+
+    /// Spawn a command. Non-interactive → tmux new-window detached + tee to log. Interactive →
+    /// either a foreground tmux window (if we're inside tmux) or an external terminal.
+    pub fn spawn(&self, req: SpawnRequest) -> Result<JobRecord> {
+        let id = Uuid::new_v4().to_string();
+        let log_path = self.jobs_dir.join(format!("{}.log", id));
+        let status_path = self.jobs_dir.join(format!("{}.status", id));
+
+        let log_str = log_path.to_string_lossy().to_string();
+        let status_str = status_path.to_string_lossy().to_string();
+
+        let window_name = window_name_for(&req);
+
+        let tmux_window = if self.availability != TmuxAvailability::Unavailable {
+            let wrapped = if req.interactive {
+                interactive_wrapper(&req.resolved, &log_str, &status_str)
+            } else {
+                background_wrapper(&req.resolved, &log_str, &status_str)
+            };
+            let opts = tmux::NewWindowOpts {
+                session: tmux_session_name(self.availability),
+                window_name: &window_name,
+                detached: !req.interactive || self.availability == TmuxAvailability::SessionBootstrapped,
+                command: &wrapped,
+            };
+            match tmux::new_window(opts) {
+                Ok(wid) => Some(wid),
+                Err(err) => {
+                    tracing::error!(?err, "tmux new-window failed, falling back to external terminal");
+                    spawn_external_terminal(&req.resolved, &log_str, &status_str)?;
+                    None
+                }
+            }
+        } else {
+            spawn_external_terminal(&req.resolved, &log_str, &status_str)?;
+            None
+        };
+
+        Ok(JobRecord {
+            id,
+            command_id: req.command_id,
+            command_title: req.command_title,
+            resolved: req.resolved,
+            started_at: Utc::now(),
+            finished_at: None,
+            status: JobStatus::Running,
+            exit_code: None,
+            tmux_window,
+            log_path: Some(log_path),
+            target: req.target,
+            profile: req.profile,
+        })
+    }
+
+    /// Examine status files + tmux window list. Returns updated jobs (call sites overwrite
+    /// status/finished_at/exit_code in the history store).
+    pub fn poll(&self, jobs: &[JobRecord]) -> Vec<JobRecord> {
+        let mut updated = Vec::new();
+        let windows = if self.availability != TmuxAvailability::Unavailable {
+            tmux::list_windows(tmux_session_name(self.availability)).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        for job in jobs {
+            if job.status != JobStatus::Running {
+                continue;
+            }
+            let status_path = self.jobs_dir.join(format!("{}.status", job.id));
+            if status_path.exists() {
+                if let Ok(s) = fs::read_to_string(&status_path) {
+                    let code: i32 = s.trim().parse().unwrap_or(-1);
+                    let mut copy = job.clone();
+                    copy.finished_at = Some(Utc::now());
+                    copy.exit_code = Some(code);
+                    copy.status = if code == 0 {
+                        JobStatus::Completed
+                    } else {
+                        JobStatus::Failed
+                    };
+                    updated.push(copy);
+                    continue;
+                }
+            }
+            // window vanished but no status file → assume killed
+            if let Some(wid) = job.tmux_window.as_deref() {
+                if !windows.iter().any(|w| w.id == wid) {
+                    let mut copy = job.clone();
+                    copy.finished_at = Some(Utc::now());
+                    copy.status = JobStatus::Killed;
+                    updated.push(copy);
+                }
+            }
+        }
+        updated
+    }
+
+    pub fn kill_job(&self, job: &JobRecord) -> Result<()> {
+        if let Some(w) = job.tmux_window.as_deref() {
+            tmux::kill_window(tmux_session_name(self.availability), w)
+                .context("tmux kill-window")?;
+        }
+        Ok(())
+    }
+
+    pub fn focus_job(&self, job: &JobRecord) -> Result<FocusResult> {
+        match (self.availability, job.tmux_window.as_deref()) {
+            (TmuxAvailability::InSession, Some(w)) => {
+                tmux::select_window(tmux_session_name(self.availability), w)?;
+                Ok(FocusResult::Focused)
+            }
+            (TmuxAvailability::SessionBootstrapped, Some(w)) => {
+                Ok(FocusResult::AttachCommand(format!(
+                    "tmux attach -t {} \\; select-window -t {}",
+                    TMUX_SESSION, w
+                )))
+            }
+            _ => Ok(FocusResult::Unfocusable),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum FocusResult {
+    Focused,
+    AttachCommand(String),
+    Unfocusable,
+}
+
+fn tmux_session_name(av: TmuxAvailability) -> Option<&'static str> {
+    match av {
+        TmuxAvailability::InSession => None, // use current
+        TmuxAvailability::SessionBootstrapped => Some(TMUX_SESSION),
+        TmuxAvailability::Unavailable => None,
+    }
+}
+
+fn window_name_for(req: &SpawnRequest) -> String {
+    let title = req
+        .command_title
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>();
+    let truncated: String = title.chars().take(30).collect();
+    if truncated.is_empty() {
+        "chrono".into()
+    } else {
+        truncated
+    }
+}
+
+fn background_wrapper(cmd: &str, log_path: &str, status_path: &str) -> String {
+    // The user-facing shell stays open after the command finishes so they can grep/scroll the
+    // output, but a sentinel status file is written so chronosphere can detect completion.
+    format!(
+        "{{ {cmd}; }} 2>&1 | tee -a {log}; echo $? > {status}; echo; echo '[chronosphere] command finished. Press Up to recall.'; exec ${{SHELL:-bash}}",
+        cmd = cmd,
+        log = shell_escape(log_path),
+        status = shell_escape(status_path),
+    )
+}
+
+fn interactive_wrapper(cmd: &str, _log_path: &str, status_path: &str) -> String {
+    // Don't tee stdout — interactive tools hate piping. Still drop a status file when they exit.
+    format!(
+        "{{ {cmd}; }}; echo $? > {status}; echo; echo '[chronosphere] interactive command finished.'; exec ${{SHELL:-bash}}",
+        cmd = cmd,
+        status = shell_escape(status_path),
+    )
+}
+
+fn shell_escape(s: &str) -> String {
+    shell_words::quote(s).to_string()
+}
+
+fn spawn_external_terminal(cmd: &str, log_path: &str, status_path: &str) -> Result<()> {
+    let wrapped = background_wrapper(cmd, log_path, status_path);
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "tell application \"Terminal\" to do script \"{}\"",
+            wrapped.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .spawn()
+            .context("osascript spawn")?;
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let candidates: &[&[&str]] = &[
+            &["x-terminal-emulator", "-e", "bash", "-c"],
+            &["gnome-terminal", "--", "bash", "-c"],
+            &["konsole", "-e", "bash", "-c"],
+            &["xterm", "-e", "bash", "-c"],
+            &["alacritty", "-e", "bash", "-c"],
+            &["kitty", "bash", "-c"],
+            &["wezterm", "start", "--", "bash", "-c"],
+        ];
+        for argv in candidates {
+            if which::which(argv[0]).is_ok() {
+                let mut cmd = std::process::Command::new(argv[0]);
+                for a in &argv[1..] {
+                    cmd.arg(a);
+                }
+                cmd.arg(&wrapped);
+                if cmd.spawn().is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+        anyhow::bail!("no terminal emulator found in $PATH");
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (cmd, log_path, status_path, wrapped);
+        anyhow::bail!("external terminal spawn not implemented for this platform");
+    }
+}

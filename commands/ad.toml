@@ -1,0 +1,124 @@
+category = "ad"
+display_name = "Active Directory"
+icon = "󰉪"
+order = 30
+
+[[command]]
+id = "ad.ldap.anon"
+title = "ldapsearch — anonymous base"
+template = "ldapsearch -x -H ldap://{target} -s base -b ''"
+requires = ["ldapsearch"]
+tags = ["ldap", "unauth"]
+
+[[command]]
+id = "ad.ldap.naming_contexts"
+title = "ldapsearch — namingContexts"
+template = "ldapsearch -x -H ldap://{target} -s base namingContexts"
+requires = ["ldapsearch"]
+tags = ["ldap"]
+
+[[command]]
+id = "ad.ldap.users_authed"
+title = "ldapsearch — domain users"
+template = "ldapsearch -x -H ldap://{target} -D '{user_at_domain}' -w '{password}' -b 'DC={domain},DC=local' '(objectClass=user)' sAMAccountName"
+requires = ["ldapsearch"]
+tags = ["ldap", "enum", "users"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "ad.nxc.ldap.users"
+title = "nxc ldap — users"
+template = "nxc ldap {target} {nxc_auth} --users"
+requires = ["nxc"]
+tags = ["ldap", "enum", "nxc"]
+
+[[command]]
+id = "ad.nxc.ldap.asreproast"
+title = "nxc ldap — AS-REP roastable"
+template = "nxc ldap {target} {nxc_auth} --asreproast asreproast.txt"
+requires = ["nxc"]
+tags = ["asrep", "roast", "ldap"]
+
+[[command]]
+id = "ad.nxc.ldap.kerberoast"
+title = "nxc ldap — kerberoastable SPNs"
+template = "nxc ldap {target} {nxc_auth} --kerberoasting kerberoast.txt"
+requires = ["nxc"]
+tags = ["kerberoast", "spn"]
+when = "creds.kind in ['plaintext','ntlm','kerberos']"
+
+[[command]]
+id = "ad.nxc.ldap.trusted_for_delegation"
+title = "nxc ldap — trusted-for-delegation"
+template = "nxc ldap {target} {nxc_auth} --trusted-for-delegation"
+requires = ["nxc"]
+tags = ["delegation"]
+
+[[command]]
+id = "ad.nxc.ldap.password_not_required"
+title = "nxc ldap — password-not-required accounts"
+template = "nxc ldap {target} {nxc_auth} --password-not-required"
+requires = ["nxc"]
+tags = ["enum"]
+
+[[command]]
+id = "ad.nxc.ldap.admin_count"
+title = "nxc ldap — adminCount=1 accounts"
+template = "nxc ldap {target} {nxc_auth} --admin-count"
+requires = ["nxc"]
+tags = ["enum", "privileged"]
+
+[[command]]
+id = "ad.nxc.ldap.machine_quota"
+title = "nxc ldap — ms-DS-MachineAccountQuota"
+template = "nxc ldap {target} {nxc_auth} -M maq"
+requires = ["nxc"]
+tags = ["enum", "maq"]
+
+[[command]]
+id = "ad.bloodhound_python"
+title = "bloodhound-python — collect all"
+template = "bloodhound-python -d {domain} -u '{user}' -p '{password}' -ns {dc} -c All --zip"
+requires = ["bloodhound-python"]
+tags = ["bloodhound", "collect"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "ad.rusthound"
+title = "rusthound — collect all"
+template = "rusthound -d {domain} -u '{user}' -p '{password}' -i {dc} -c All --zip"
+requires = ["rusthound"]
+tags = ["bloodhound", "collect"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "ad.bloodhound_ce_python"
+title = "bloodyAD — get all info"
+template = "bloodyAD -d {domain} -u '{user}' -p '{password}' --host {dc} get domain"
+requires = ["bloodyAD"]
+tags = ["bloodyad"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "ad.adidnsdump"
+title = "adidnsdump — DNS zone dump"
+template = "adidnsdump --print-zones -u '{domain}\\{user}' -p '{password}' {dc}"
+requires = ["adidnsdump"]
+tags = ["dns"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "ad.windapsearch"
+title = "windapsearch — domain admins"
+template = "windapsearch -d {domain} -u '{user}@{domain}' -p '{password}' --da --dc-ip {dc}"
+requires = ["windapsearch"]
+tags = ["enum", "ldap"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "ad.ldapdomaindump"
+title = "ldapdomaindump"
+template = "ldapdomaindump -u '{domain}\\{user}' -p '{password}' {dc}"
+requires = ["ldapdomaindump"]
+tags = ["enum", "ldap"]
+when = "creds.kind == 'plaintext' and target.has_dc"

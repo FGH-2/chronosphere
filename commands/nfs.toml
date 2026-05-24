@@ -1,0 +1,32 @@
+category = "nfs"
+display_name = "NFS"
+icon = ""
+order = 55
+
+[[command]]
+id = "nfs.showmount"
+title = "showmount -e (list exports)"
+template = "showmount -e {target}"
+requires = ["showmount"]
+tags = ["enum", "exports"]
+
+[[command]]
+id = "nfs.mount"
+title = "mount NFS export"
+template = "sudo mkdir -p /mnt/nfs && sudo mount -t nfs {target}:/EXPORT /mnt/nfs -o nolock"
+requires = ["mount"]
+tags = ["mount"]
+
+[[command]]
+id = "nfs.umount"
+title = "unmount"
+template = "sudo umount /mnt/nfs"
+requires = ["umount"]
+tags = ["mount"]
+
+[[command]]
+id = "nfs.nmap.script"
+title = "nmap nfs-ls / nfs-showmount"
+template = "nmap -p 111,2049 --script=nfs-ls,nfs-showmount,nfs-statfs {target}"
+requires = ["nmap"]
+tags = ["enum"]

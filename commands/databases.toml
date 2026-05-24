@@ -1,0 +1,105 @@
+category = "databases"
+display_name = "Databases"
+icon = ""
+order = 85
+
+[[command]]
+id = "db.mysql.connect"
+title = "mysql connect"
+template = "mysql -h {target} -u {user} -p'{password}'"
+requires = ["mysql"]
+tags = ["mysql", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "db.mysql.dump_databases"
+title = "mysql — list databases"
+template = "mysql -h {target} -u {user} -p'{password}' -e 'SHOW DATABASES;'"
+requires = ["mysql"]
+tags = ["mysql", "enum"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "db.mysql.creds_in_config"
+title = "mysql config locations"
+template = "find / -name 'my.cnf' -o -name 'wp-config.php' -o -name 'config.php' 2>/dev/null"
+tags = ["mysql", "creds"]
+
+[[command]]
+id = "db.psql.connect"
+title = "psql connect"
+template = "PGPASSWORD='{password}' psql -h {target} -U {user}"
+requires = ["psql"]
+tags = ["postgres", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "db.psql.list"
+title = "psql — list databases"
+template = "PGPASSWORD='{password}' psql -h {target} -U {user} -c '\\l'"
+requires = ["psql"]
+tags = ["postgres", "enum"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "db.redis.connect"
+title = "redis-cli (no auth)"
+template = "redis-cli -h {target}"
+requires = ["redis-cli"]
+tags = ["redis", "interactive"]
+interactive = true
+
+[[command]]
+id = "db.redis.info"
+title = "redis INFO"
+template = "redis-cli -h {target} INFO"
+requires = ["redis-cli"]
+tags = ["redis", "enum"]
+
+[[command]]
+id = "db.redis.auth"
+title = "redis-cli with password"
+template = "redis-cli -h {target} -a '{password}'"
+requires = ["redis-cli"]
+tags = ["redis", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "db.mongo.connect"
+title = "mongo connect"
+template = "mongo --host {target} --port 27017"
+requires = ["mongo"]
+tags = ["mongo", "interactive"]
+interactive = true
+
+[[command]]
+id = "db.mongosh.connect"
+title = "mongosh connect"
+template = "mongosh 'mongodb://{target}:27017'"
+requires = ["mongosh"]
+tags = ["mongo", "interactive"]
+interactive = true
+
+[[command]]
+id = "db.mongo.dbs"
+title = "mongo — show dbs"
+template = "mongo --host {target} --eval 'show dbs'"
+requires = ["mongo"]
+tags = ["mongo", "enum"]
+
+[[command]]
+id = "db.oracle.tnsping"
+title = "oracle tnsping"
+template = "tnsping {target}"
+requires = ["tnsping"]
+tags = ["oracle"]
+
+[[command]]
+id = "db.oracle.odat"
+title = "odat all"
+template = "odat all -s {target}"
+requires = ["odat"]
+tags = ["oracle"]

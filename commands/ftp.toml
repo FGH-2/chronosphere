@@ -1,0 +1,54 @@
+category = "ftp"
+display_name = "FTP"
+icon = ""
+order = 75
+
+[[command]]
+id = "ftp.nxc.checkauth"
+title = "nxc ftp"
+template = "nxc ftp {target} {nxc_auth}"
+requires = ["nxc"]
+tags = ["enum"]
+
+[[command]]
+id = "ftp.anonymous"
+title = "ftp anonymous"
+template = "ftp -n -p {target} <<EOF\nuser anonymous anonymous\nls -la\nbye\nEOF"
+requires = ["ftp"]
+tags = ["anon"]
+
+[[command]]
+id = "ftp.curl.list"
+title = "curl ftp listing"
+template = "curl -u 'anonymous:anonymous@' ftp://{target}/"
+requires = ["curl"]
+tags = ["anon"]
+
+[[command]]
+id = "ftp.curl.list_authed"
+title = "curl ftp listing (auth)"
+template = "curl -u '{user}:{password}' ftp://{target}/"
+requires = ["curl"]
+tags = ["authed"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "ftp.lftp.mirror"
+title = "lftp recursive mirror (anon)"
+template = "lftp -u anonymous,anonymous {target} -e 'mirror -c .; bye'"
+requires = ["lftp"]
+tags = ["mirror"]
+
+[[command]]
+id = "ftp.hydra.brute"
+title = "hydra ftp brute"
+template = "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt ftp://{target} -t 4"
+requires = ["hydra"]
+tags = ["brute", "noisy"]
+
+[[command]]
+id = "ftp.nmap.script"
+title = "nmap ftp scripts"
+template = "nmap -p 21 --script=ftp-anon,ftp-bounce,ftp-syst,ftp-vsftpd-backdoor {target}"
+requires = ["nmap"]
+tags = ["enum"]

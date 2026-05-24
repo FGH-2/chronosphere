@@ -1,0 +1,32 @@
+category = "iis"
+display_name = "IIS"
+icon = ""
+order = 72
+
+[[command]]
+id = "iis.short_name_scanner"
+title = "IIS short-name scanner"
+template = "java -jar /opt/iis_shortname_scanner.jar 2 20 http://{target}/"
+requires = ["java"]
+tags = ["shortname"]
+
+[[command]]
+id = "iis.feroxbuster.aspx"
+title = "feroxbuster — aspx focus"
+template = "feroxbuster -u http://{target} -w /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-files.txt -x aspx,asp,config,bak"
+requires = ["feroxbuster"]
+tags = ["fuzz", "aspx"]
+
+[[command]]
+id = "iis.curl.options"
+title = "curl OPTIONS (WebDAV?)"
+template = "curl -ki -X OPTIONS http://{target}"
+requires = ["curl"]
+tags = ["options", "webdav"]
+
+[[command]]
+id = "iis.davtest"
+title = "davtest (WebDAV)"
+template = "davtest -url http://{target}"
+requires = ["davtest"]
+tags = ["webdav"]
