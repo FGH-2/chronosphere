@@ -93,18 +93,67 @@ cargo build --release && cp target/release/chronosphere /usr/local/bin/
 
 First run extracts the embedded built-in command library (`commands/*.toml`) into your XDG data directory (`~/.local/share/chronosphere/commands` on Linux, `~/Library/Application Support/chronosphere/commands` on macOS). Edit those freely — your changes persist; rebuilds don't overwrite them. Use `chronosphere update-templates --force` to overwrite from the embedded set when the binary ships new commands.
 
-### Cross-compile for Pwnbox (x86_64-linux from macOS)
+### Cross-compile for Pwnbox (x86_64 Linux from macOS)
 
-Pwnbox runs Linux x86_64 and has very little spare disk for `cargo install`. Build a static musl binary once on your laptop instead:
+Pwnbox is **Linux amd64**. Your Mac build is **macOS** — `cargo build --target x86_64-unknown-linux-*` on macOS will **not** work by itself: rustc will invoke the host `cc`/`ld`, which does not understand Linux linker flags (`ld: unknown options: --as-needed …`).
+
+Pick one of the paths below. Both produce a binary you can `scp` with `chronosphere deploy … --binary <path>`.
+
+#### Option A — `cargo-zigbuild` + Zig (no Docker)
+
+Zig supplies the Linux linker; `cargo-zigbuild` wires it into Cargo.
 
 ```bash
+# 1. toolchain + target
 rustup target add x86_64-unknown-linux-musl
-cargo install --locked cargo-zigbuild     # uses zig as the cross-linker (~30 MB)
+
+# 2. cross linker (Zig must be on PATH)
+brew install zig
+cargo install cargo-zigbuild
+
+# 3. build (from the repo root)
 cargo zigbuild --release --target x86_64-unknown-linux-musl
-file target/x86_64-unknown-linux-musl/release/chronosphere   # ELF 64-bit, ~4 MB
+
+# 4. sanity check
+file target/x86_64-unknown-linux-musl/release/chronosphere
+# → ELF 64-bit LSB executable, x86-64, … statically linked (musl) …
 ```
 
+Output: `target/x86_64-unknown-linux-musl/release/chronosphere` (static musl; portable on most Linux boxes).
+
+#### Option B — `cross` (Docker; often least fiddly)
+
+Uses a Linux container as the build environment — no Zig on the host.
+
+```bash
+# Docker Desktop (or another Docker engine) must be running
+cargo install cross --git https://github.com/cross-rs/cross
+
+cross build --release --target x86_64-unknown-linux-gnu
+file target/x86_64-unknown-linux-gnu/release/chronosphere
+# → ELF 64-bit … dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2 …
+```
+
+Output: `target/x86_64-unknown-linux-gnu/release/chronosphere` (glibc; fine on Pwnbox / Debian-style images).
+
+#### Option C — build on Linux
+
+On Pwnbox or any Linux host with Rust installed:
+
+```bash
+cargo build --release
+# → target/release/chronosphere
+```
+
+No cross toolchain required; use when you have disk/Rust on the remote and only need a quick local binary.
+
+#### Apple Silicon note
+
+An **arm64** Mac still cross-compiles to **x86_64** Linux with the targets above (`x86_64-unknown-linux-musl` or `x86_64-unknown-linux-gnu`). Do not use `aarch64-unknown-linux-*` for Pwnbox unless you know the remote is ARM.
+
 ### Deploy to a remote (scp + bootstrap)
+
+Use whichever `release/chronosphere` path your cross build produced (`…-musl/…` or `…-gnu/…`).
 
 ```bash
 # Pubkey (uses your agent / ssh-config):

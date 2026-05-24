@@ -155,11 +155,13 @@ fn warn_if_not_elf(path: &Path) -> Result<()> {
             path.display(),
             if is_macho { "looks like Mach-O / macOS" } else { "unknown format" }
         );
-        eprintln!("[chronosphere] Pwnbox expects Linux x86_64. Build with one of:");
-        eprintln!("  rustup target add x86_64-unknown-linux-musl");
-        eprintln!("  cargo install cargo-zigbuild   # uses zig as the cross linker");
+        eprintln!("[chronosphere] Pwnbox expects Linux x86_64 (ELF). On macOS, plain");
+        eprintln!("  cargo build --target … will fail — you need a Linux linker.");
+        eprintln!("Option A (Zig):  brew install zig && cargo install cargo-zigbuild");
         eprintln!("  cargo zigbuild --release --target x86_64-unknown-linux-musl");
-        eprintln!("Then re-run: chronosphere deploy <host> --binary target/x86_64-unknown-linux-musl/release/chronosphere");
+        eprintln!("Option B (Docker): cross build --release --target x86_64-unknown-linux-gnu");
+        eprintln!("See README.md § Cross-compile for Pwnbox.");
+        eprintln!("Then: chronosphere deploy <host> --binary target/.../release/chronosphere");
         eprintln!();
     }
     Ok(())
