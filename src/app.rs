@@ -6,7 +6,7 @@ use crate::engagement::{
 use crate::exec::{Executor, FocusResult, SpawnRequest};
 use crate::library::{CategoryFile, CommandEntry, CommandLibrary, CommandVariant};
 use crate::render::{self, RenderContext};
-use crate::ui;
+use crate::ui::{self, splash::SplashState};
 use crate::vim::{Action, KeyParser, Mode};
 
 use anyhow::{Context, Result};
@@ -28,7 +28,6 @@ use std::io::{Stdout, stdout};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use tokio::time::interval;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -249,6 +248,7 @@ pub struct App {
     pub jobs: Vec<JobRecord>,
 
     pub flash: Option<FlashMessage>,
+    pub splash: Option<SplashState>,
     pub running: bool,
 
     pub _watcher: Option<notify::RecommendedWatcher>,
@@ -282,6 +282,7 @@ impl App {
             modal: Modal::None,
             jobs: Vec::new(),
             flash: None,
+            splash: Some(SplashState::new()),
             running: true,
             _watcher: None,
             library_reload_pending: false,
@@ -318,10 +319,13 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<()> {
         let mut events = EventStream::new();
-        let mut tick = interval(Duration::from_millis(500));
 
         while self.running {
             terminal.draw(|f| ui::draw(f, self))?;
+            // While the splash animation is on screen we tick ≈16 fps for smooth
+            // motion; once dismissed we drop back to 2 Hz to keep job polling cheap.
+            let tick_ms = if self.splash.is_some() { 60 } else { 500 };
+            let sleep = tokio::time::sleep(Duration::from_millis(tick_ms));
             tokio::select! {
                 ev = events.next() => {
                     if let Some(Ok(Event::Key(ke))) = ev {
@@ -330,7 +334,7 @@ impl App {
                         }
                     }
                 }
-                _ = tick.tick() => {
+                _ = sleep => {
                     self.tick();
                 }
             }
@@ -378,6 +382,18 @@ impl App {
     // === key handling ====================================================
 
     fn handle_key(&mut self, ke: KeyEvent) {
+        // Splash screen: any key dismisses it and is consumed. Exception: Ctrl-C
+        // / Ctrl-Q still quits so a hung TUI is escapable on first launch.
+        if self.splash.is_some() {
+            let is_quit = matches!(ke.code, KeyCode::Char('c') | KeyCode::Char('q'))
+                && ke.modifiers.contains(KeyModifiers::CONTROL);
+            self.splash = None;
+            self.key_parser.reset();
+            if is_quit {
+                self.running = false;
+            }
+            return;
+        }
         // mode-specific handling
         match self.mode {
             Mode::Command => self.handle_command_mode_key(ke),
@@ -553,6 +569,10 @@ impl App {
             "creds" | "c" => self.open_creds_modal(rest.as_slice()),
             "tools" => self.modal = Modal::Tools(ToolsModal),
             "reload" => self.reload_library(),
+            "splash" | "dashboard" => {
+                self.splash = Some(SplashState::new());
+                self.modal = Modal::None;
+            }
             "write" | "w" => self.maybe_save_inline_edit_as(rest.first().copied()),
             "search" => {
                 self.mode = Mode::SearchGlobal;

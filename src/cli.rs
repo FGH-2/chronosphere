@@ -108,6 +108,28 @@ pub enum Command {
 
     /// Print an `eval $(chronosphere path-install)` snippet for shell setup.
     PathInstall,
+
+    /// Run as a Model Context Protocol server on stdio (for cursor-agent etc).
+    McpServe,
+
+    /// Print an mcp.json snippet to wire chronosphere into Cursor / Claude clients.
+    McpConfig {
+        /// Generate an SSH-wrapped server config for the named host (uses ControlMaster).
+        #[arg(long)]
+        ssh: Option<String>,
+        /// SSH port for the remote (default 22).
+        #[arg(long, default_value_t = 22)]
+        port: u16,
+        /// Path to the remote chronosphere binary.
+        #[arg(long, default_value = "/usr/local/bin/chronosphere")]
+        remote_path: String,
+        /// Identity file for SSH (optional).
+        #[arg(long)]
+        identity: Option<PathBuf>,
+    },
+
+    /// Ship the chronosphere binary to a remote host via scp (Pwnbox, lab box, etc).
+    Deploy(crate::deploy::DeployArgs),
 }
 
 #[derive(Args, Debug)]
@@ -240,6 +262,35 @@ alias chronosphere='{bin}'
 # tab completion for bash:
 #   source <(chronosphere completions bash)"#
             );
+            Ok(true)
+        }
+        Command::McpServe => {
+            let opts = crate::mcp::ServerOpts {
+                engagement: cli.engagement.clone(),
+                root: root.clone(),
+            };
+            crate::mcp::serve(opts).await.context("mcp serve")?;
+            Ok(true)
+        }
+        Command::McpConfig { ssh, port, remote_path, identity } => {
+            if let Some(host) = ssh {
+                println!(
+                    "{}",
+                    crate::deploy::mcp_config_ssh_snippet(&host, port, &remote_path, identity.as_deref())
+                );
+            } else {
+                let bin = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.to_str().map(String::from))
+                    .unwrap_or_else(|| "chronosphere".to_string());
+                println!("{}", crate::deploy::mcp_config_local_snippet(&bin));
+            }
+            println!("\n# Paste the inner mcpServers entry into ~/.cursor/mcp.json");
+            println!("# (or merge into an existing mcpServers object).");
+            Ok(true)
+        }
+        Command::Deploy(deploy_args) => {
+            crate::deploy::run(deploy_args).context("deploy")?;
             Ok(true)
         }
         Command::UpdateTemplates { force } => {

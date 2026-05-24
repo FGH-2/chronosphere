@@ -1,5 +1,6 @@
 pub mod modals;
 pub mod panels;
+pub mod splash;
 pub mod theme;
 
 use crate::app::{App, Focus, Modal};
@@ -8,6 +9,13 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+
+    // Splash screen takes over the whole frame until the user dismisses it.
+    if let Some(splash) = app.splash.as_ref() {
+        splash::draw(f, area, splash);
+        return;
+    }
+
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
