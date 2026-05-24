@@ -58,3 +58,92 @@ title = "traceroute"
 template = "traceroute {target}"
 requires = ["traceroute"]
 tags = ["network"]
+
+# === Chained workflows ===
+
+[[command]]
+id = "recon.masscan.then.nmap"
+title = "masscan -> nmap targeted version detect"
+template = """sudo masscan -p1-65535 {target} --rate=10000 -e tun0 -oG masscan.gnmap \\
+ && ports=$(awk '/Ports:/{{for(i=1;i<=NF;i++) if($i ~ /\\/open\\//) {{split($i,a,\"/\"); printf \"%s,\",a[1]}}}}' masscan.gnmap | sed 's/,$//') \\
+ && echo \"open: $ports\" \\
+ && [ -n \"$ports\" ] && nmap -sV -sC -p$ports -oA scans/targeted {target}"""
+requires = ["masscan", "nmap"]
+tags = ["chain", "fast"]
+
+[[command]]
+id = "recon.dns.fierce"
+title = "fierce dns brute"
+template = "fierce --domain {hostname}"
+requires = ["fierce"]
+tags = ["dns"]
+
+[[command]]
+id = "recon.dns.dnsenum"
+title = "dnsenum (axfr + brute)"
+template = "dnsenum {hostname}"
+requires = ["dnsenum"]
+tags = ["dns"]
+
+[[command]]
+id = "recon.dns.dig.axfr"
+title = "dig — try AXFR"
+template = "dig axfr @{target} {hostname}"
+requires = ["dig"]
+tags = ["dns", "axfr"]
+
+[[command]]
+id = "recon.dns.dig.any"
+title = "dig ANY"
+template = "dig ANY @{target} {hostname}"
+requires = ["dig"]
+tags = ["dns"]
+
+[[command]]
+id = "recon.dns.host"
+title = "host -a"
+template = "host -a {hostname} {target}"
+requires = ["host"]
+tags = ["dns"]
+
+[[command]]
+id = "recon.whois"
+title = "whois lookup"
+template = "whois {hostname}"
+requires = ["whois"]
+tags = ["osint"]
+
+[[command]]
+id = "recon.ssl.tlsx"
+title = "tlsx — TLS fingerprint"
+template = "echo {target} | tlsx -hash sha256,sha1 -san -cn -ttl -ttn -version -tls-version -wildcard-cert -probe-status -resp-time -mismatched -revoked"
+requires = ["tlsx"]
+tags = ["tls"]
+
+[[command]]
+id = "recon.ssl.testssl"
+title = "testssl.sh — TLS audit"
+template = "testssl.sh {target}"
+requires = ["testssl.sh"]
+tags = ["tls", "audit"]
+
+[[command]]
+id = "recon.nuclei.network"
+title = "nuclei — network templates"
+template = "nuclei -u {target} -t /root/nuclei-templates/network/ -severity high,critical"
+requires = ["nuclei"]
+tags = ["nuclei", "network"]
+
+[[command]]
+id = "recon.shodan.lookup"
+title = "shodan host lookup"
+template = "shodan host {target}"
+requires = ["shodan"]
+tags = ["osint"]
+
+[[command]]
+id = "recon.seclists.copy_to_engagement"
+title = "Copy a focused SecLists slice into engagement wordlists"
+template = "mkdir -p wordlists && cp /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-{directories,files,words}.txt wordlists/"
+requires = ["cp"]
+tags = ["seclists", "wordlists"]

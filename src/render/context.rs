@@ -20,12 +20,23 @@ impl RenderContext {
             "ip" => self.target.as_ref().and_then(|t| t.ip.clone()),
             "hostname" => self.target.as_ref().and_then(|t| t.hostname.clone()),
             "dc" => self.target.as_ref().and_then(|t| t.dc_name.clone()),
+            "dc_fqdn" => self.dc_fqdn(),
             "lhost" => self.target.as_ref().and_then(|t| t.lhost.clone()),
             "lport" => self
                 .target
                 .as_ref()
                 .and_then(|t| t.lport.map(|p| p.to_string())),
             "domain" => self.profile.as_ref().and_then(|p| p.domain.clone()),
+            "domain_upper" => self
+                .profile
+                .as_ref()
+                .and_then(|p| p.domain.clone())
+                .map(|d| d.to_uppercase()),
+            "domain_short" => self
+                .profile
+                .as_ref()
+                .and_then(|p| p.domain.clone())
+                .and_then(|d| d.split('.').next().map(|s| s.to_string())),
             "user" => self.profile.as_ref().map(|p| p.username.clone()),
             "username" => self.profile.as_ref().map(|p| p.username.clone()),
             "password" => self.profile.as_ref().and_then(|p| match p.kind {
@@ -121,6 +132,16 @@ impl RenderContext {
             Some(d) => Some(format!("{}\\{}", d, p.username)),
             None => Some(p.username.clone()),
         }
+    }
+
+    fn dc_fqdn(&self) -> Option<String> {
+        let t = self.target.as_ref()?;
+        let dc = t.dc_name.clone()?;
+        if dc.contains('.') {
+            return Some(dc);
+        }
+        let dom = self.profile.as_ref().and_then(|p| p.domain.clone())?;
+        Some(format!("{}.{}", dc, dom))
     }
 
     fn user_at_domain(&self) -> Option<String> {

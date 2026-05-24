@@ -1,4 +1,6 @@
 mod app;
+mod builtin;
+mod cli;
 mod clipboard;
 mod config;
 mod engagement;
@@ -9,6 +11,7 @@ mod ui;
 mod vim;
 
 use anyhow::{Context, Result};
+use clap::Parser;
 use std::fs::OpenOptions;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -16,6 +19,14 @@ use tracing_subscriber::{EnvFilter, fmt};
 async fn main() -> Result<()> {
     init_tracing().context("init tracing")?;
     tracing::info!("starting chronosphere");
+
+    let parsed = cli::Cli::parse();
+    if cli::dispatch(parsed).await.context("dispatch cli")? {
+        return Ok(());
+    }
+
+    // Default behavior: launch TUI.
+    builtin::ensure_user_dir().ok();
     let res = app::App::new()
         .await
         .context("init app")?

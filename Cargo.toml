@@ -28,6 +28,8 @@ notify = "6"
 base64 = "0.22"
 rand = "0.8"
 futures = "0.3"
+clap = { version = "4", features = ["derive"] }
+include_dir = "0.7"
 
 [profile.release]
 lto = "thin"

