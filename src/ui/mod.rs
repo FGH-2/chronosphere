@@ -55,6 +55,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Modal::Tools(_) => modals::tools::render(f, area, app),
         Modal::Search { .. } => modals::search::render(f, area, app),
         Modal::Edit(_) => modals::edit::render(f, area, app),
+        Modal::JobLog(_) => modals::job_log::render(f, area, app),
     }
 
     let _ = Focus::Categories; // keep import alive

@@ -12,7 +12,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let is_focused = app.focus == Focus::Jobs;
     let border_style = if is_focused { Theme::border_active() } else { Theme::border() };
 
-    let title = format!(" jobs ({} running) ", app.jobs_running_count());
+    let title = if is_focused {
+        format!(" jobs ({} running) — Enter/L log ", app.jobs_running_count())
+    } else {
+        format!(" jobs ({} running) ", app.jobs_running_count())
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(title, Theme::accent_bold()))

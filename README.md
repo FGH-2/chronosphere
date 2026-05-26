@@ -67,6 +67,8 @@ Inside the TUI, press `?` for the full keymap. The basics:
 | `j` / `k` | move cursor down / up |
 | `gg` / `G` | top / bottom |
 | `r` | run the current command in a new tmux window |
+| `Enter` / `L` | open floating job log (jobs panel focused) |
+| `o` | jump to the job's tmux window |
 | `5r` | run it five times (e.g. spray) |
 | `R` | run every visible command (or every multi-selected one) |
 | `y` | yank resolved command to clipboard |

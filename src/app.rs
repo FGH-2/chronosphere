@@ -192,6 +192,16 @@ impl CredEditField {
 #[derive(Default)]
 pub struct ToolsModal;
 
+pub struct JobLogModal {
+    pub job_id: String,
+    pub title: String,
+    pub status: JobStatus,
+    pub exit_code: Option<i32>,
+    pub lines: Vec<String>,
+    pub scroll: usize,
+    pub follow: bool,
+}
+
 pub struct EditModal {
     pub source_command_id: Option<String>,
     pub command_title: String,
@@ -221,6 +231,7 @@ pub enum Modal {
         cursor: usize,
     },
     Edit(EditModal),
+    JobLog(JobLogModal),
 }
 
 pub struct App {
@@ -324,7 +335,13 @@ impl App {
             terminal.draw(|f| ui::draw(f, self))?;
             // While the splash animation is on screen we tick ≈16 fps for smooth
             // motion; once dismissed we drop back to 2 Hz to keep job polling cheap.
-            let tick_ms = if self.splash.is_some() { 60 } else { 500 };
+            let tick_ms = if self.splash.is_some() {
+                60
+            } else if matches!(self.modal, Modal::JobLog(_)) {
+                200
+            } else {
+                500
+            };
             let sleep = tokio::time::sleep(Duration::from_millis(tick_ms));
             tokio::select! {
                 ev = events.next() => {
@@ -404,6 +421,18 @@ impl App {
     }
 
     fn handle_normal_mode_key(&mut self, ke: KeyEvent) {
+        if matches!(self.modal, Modal::JobLog(_)) {
+            self.handle_job_log_modal_key(ke);
+            return;
+        }
+        if matches!(self.modal, Modal::None)
+            && self.focus == Focus::Jobs
+            && matches!(ke.code, KeyCode::Enter)
+        {
+            self.open_job_log_modal();
+            self.key_parser.reset();
+            return;
+        }
         if !matches!(self.modal, Modal::None | Modal::Help | Modal::Tools(_)) {
             self.handle_modal_key(ke);
             return;
@@ -449,6 +478,11 @@ impl App {
             Action::ToggleSelect => self.toggle_select_current(),
             Action::ClearSelection => self.multi_selected.clear(),
             Action::OpenActiveJob => self.open_active_job(),
+            Action::OpenJobLog => {
+                if self.focus == Focus::Jobs {
+                    self.open_job_log_modal();
+                }
+            }
             Action::NextJob => self.selected_job = self.selected_job.saturating_add(1),
             Action::PrevJob => self.selected_job = self.selected_job.saturating_sub(1),
             Action::KillJob => self.kill_selected_job(),
@@ -1497,12 +1531,88 @@ impl App {
         }
     }
 
+    fn open_job_log_modal(&mut self) {
+        let job = match self.selected_job_record() {
+            Some(j) => j.clone(),
+            None => {
+                self.flash_error("no job selected".into());
+                return;
+            }
+        };
+        let follow = matches!(job.status, JobStatus::Running);
+        let lines = ui::modals::job_log::load_log_lines(&job);
+        self.modal = Modal::JobLog(JobLogModal {
+            job_id: job.id,
+            title: job.command_title,
+            status: job.status,
+            exit_code: job.exit_code,
+            lines,
+            scroll: 0,
+            follow,
+        });
+    }
+
+    fn handle_job_log_modal_key(&mut self, ke: KeyEvent) {
+        let Modal::JobLog(modal) = &mut self.modal else {
+            return;
+        };
+        let ctrl = ke.modifiers.contains(KeyModifiers::CONTROL);
+        let page = 12usize;
+
+        match ke.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.modal = Modal::None;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                modal.follow = false;
+                modal.scroll = modal.scroll.saturating_add(1);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                modal.follow = false;
+                modal.scroll = modal.scroll.saturating_sub(1);
+            }
+            KeyCode::Char('d') if ctrl => {
+                modal.follow = false;
+                modal.scroll = modal.scroll.saturating_add(page);
+            }
+            KeyCode::Char('u') if ctrl => {
+                modal.follow = false;
+                modal.scroll = modal.scroll.saturating_sub(page);
+            }
+            KeyCode::Char('g') => {
+                modal.follow = false;
+                modal.scroll = 0;
+            }
+            KeyCode::Char('G') => {
+                modal.follow = matches!(
+                    self.jobs
+                        .iter()
+                        .find(|j| j.id == modal.job_id)
+                        .map(|j| j.status),
+                    Some(JobStatus::Running)
+                );
+                modal.scroll = usize::MAX;
+            }
+            KeyCode::Char('f') => {
+                modal.follow = !modal.follow;
+            }
+            KeyCode::Char('o') => {
+                self.open_active_job();
+            }
+            _ => {}
+        }
+    }
+
+    fn selected_job_record(&self) -> Option<&JobRecord> {
+        self.jobs.iter().rev().nth(self.selected_job)
+    }
+
     fn open_active_job(&mut self) {
         let exe = match self.executor.as_ref() {
             Some(e) => e,
             None => return,
         };
-        let job = match self.jobs.iter().rev().nth(self.selected_job) {
+        let job = match self.selected_job_record() {
             Some(j) => j.clone(),
             None => return,
         };
@@ -1520,7 +1630,7 @@ impl App {
     }
 
     fn kill_selected_job(&mut self) {
-        let job_id = match self.jobs.iter().rev().nth(self.selected_job).map(|j| j.id.clone()) {
+        let job_id = match self.selected_job_record().map(|j| j.id.clone()) {
             Some(id) => id,
             None => return,
         };
