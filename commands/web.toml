@@ -45,10 +45,54 @@ template = "ffuf -u http://{target}/FUZZ -w /usr/share/wordlists/seclists/Discov
 requires = ["ffuf"]
 tags = ["fuzz"]
 
+# Vhost fuzz: curl a non-existent Host (coffeedeadbeef.{hostname}) for body size, then ffuf -fs.
+# Set {hostname} on the target (e.g. app.htb). Edit GHOST= in the template if you need another junk name.
+# Manual re-run: baseline prints size → chronosphere run -v vhost_fs=<bytes> … or use web.ffuf.vhost.manual
+
+[[command]]
+id = "web.ffuf.vhost.baseline"
+title = "ffuf vhost — baseline size (curl junk Host)"
+template = """GHOST=coffeedeadbeef; echo "[*] non-existent Host: ${GHOST}.{hostname}"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" http://{target}/ | wc -c); \\
+  echo "[*] baseline response size: ${SZ} bytes"; \\
+  echo "[*] reuse: chronosphere run -v vhost_fs=${SZ} …  or run 'ffuf — vhost fuzz (manual -fs)'" """
+requires = ["curl"]
+tags = ["fuzz", "vhost", "recon"]
+
+[[command]]
+id = "web.ffuf.vhost.baseline.https"
+title = "ffuf vhost — baseline size (https)"
+template = """GHOST=coffeedeadbeef; echo "[*] non-existent Host: ${GHOST}.{hostname}"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" https://{target}/ | wc -c); \\
+  echo "[*] baseline response size: ${SZ} bytes"; \\
+  echo "[*] reuse: chronosphere run -v vhost_fs=${SZ} …" """
+requires = ["curl"]
+tags = ["fuzz", "vhost", "recon", "https"]
+
 [[command]]
 id = "web.ffuf.vhost"
-title = "ffuf — vhost fuzz"
-template = "ffuf -u http://{target} -H 'Host: FUZZ.{hostname}' -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -fs 0"
+title = "ffuf — vhost fuzz (baseline curl → -fs)"
+template = """bash -c 'GHOST=coffeedeadbeef; BASE="http://{target}/"; WL="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" "${BASE}" | wc -c); \\
+  echo "[*] baseline Host ${GHOST}.{hostname} → ${SZ} bytes (ffuf -fs ${SZ})"; \\
+  ffuf -u "${BASE}" -H "Host: FUZZ.{hostname}" -w "${WL}" -fs "${SZ}" -t 50'"""
+requires = ["ffuf", "curl"]
+tags = ["fuzz", "vhost", "chain"]
+
+[[command]]
+id = "web.ffuf.vhost.https"
+title = "ffuf — vhost fuzz https (baseline curl → -fs)"
+template = """bash -c 'GHOST=coffeedeadbeef; BASE="https://{target}/"; WL="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" "${BASE}" | wc -c); \\
+  echo "[*] baseline Host ${GHOST}.{hostname} → ${SZ} bytes (ffuf -fs ${SZ})"; \\
+  ffuf -u "${BASE}" -H "Host: FUZZ.{hostname}" -w "${WL}" -fs "${SZ}" -t 50'"""
+requires = ["ffuf", "curl"]
+tags = ["fuzz", "vhost", "chain", "https"]
+
+[[command]]
+id = "web.ffuf.vhost.manual"
+title = "ffuf — vhost fuzz (manual -fs; run baseline first)"
+template = "ffuf -u http://{target}/ -H 'Host: FUZZ.{hostname}' -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -fs {vhost_fs} -t 50"
 requires = ["ffuf"]
 tags = ["fuzz", "vhost"]
 
