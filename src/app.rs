@@ -1789,19 +1789,27 @@ impl App {
             Some(j) => j.clone(),
             None => return,
         };
-        match exe.focus_job(&job) {
-            Ok(FocusResult::Focused) => {
-                self.flash_ok(format!("focused window {}", job.tmux_window.unwrap_or_default()))
-            }
-            Ok(FocusResult::AttachCommand(cmd)) => {
-                if let Err(err) = clipboard::copy(&cmd) {
-                    tracing::warn!(?err, "clipboard");
+        // Prefer actually opening an interactive shell (new terminal window when not in tmux).
+        match exe.open_job_interactive(&job) {
+            Ok(()) => self.flash_ok("opened tmux window".into()),
+            Err(err) => {
+                // Fallback: keep old behavior as a last resort.
+                match exe.focus_job(&job) {
+                    Ok(FocusResult::Focused) => self.flash_ok(format!(
+                        "focused window {}",
+                        job.tmux_window.unwrap_or_default()
+                    )),
+                    Ok(FocusResult::AttachCommand(cmd)) => {
+                        if let Err(err) = clipboard::copy(&cmd) {
+                            tracing::warn!(?err, "clipboard");
+                        }
+                        self.flash_ok(format!("attach cmd yanked: {}", cmd));
+                    }
+                    Ok(FocusResult::Unfocusable) => self.flash_error("job has no tmux window".into()),
+                    Err(_) => self.flash_error(format!("open job: {}", err)),
                 }
-                self.flash_ok(format!("attach cmd yanked: {}", cmd));
             }
-            Ok(FocusResult::Unfocusable) => self.flash_error("job has no tmux window".into()),
-            Err(err) => self.flash_error(format!("focus: {}", err)),
-        }
+        };
     }
 
     fn kill_selected_job(&mut self) {

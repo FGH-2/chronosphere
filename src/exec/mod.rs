@@ -172,6 +172,26 @@ impl Executor {
             _ => Ok(FocusResult::Unfocusable),
         }
     }
+
+    /// Open an interactive tmux view of a job:
+    /// - inside tmux: selects the window
+    /// - outside tmux but session exists: opens a new terminal and attaches
+    pub fn open_job_interactive(&self, job: &JobRecord) -> Result<()> {
+        let Some(w) = job.tmux_window.as_deref() else {
+            anyhow::bail!("job has no tmux window");
+        };
+        match self.availability {
+            TmuxAvailability::InSession => {
+                tmux::select_window(tmux_session_name(self.availability), w)?;
+                Ok(())
+            }
+            TmuxAvailability::SessionBootstrapped => {
+                let cmd = format!("tmux attach -t {} \\; select-window -t {}", TMUX_SESSION, w);
+                spawn_external_terminal_simple(&cmd)
+            }
+            TmuxAvailability::Unavailable => anyhow::bail!("tmux not available"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -281,6 +301,53 @@ fn spawn_external_terminal(cmd: &str, log_path: &str, status_path: &str) -> Resu
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         let _ = (cmd, log_path, status_path, wrapped);
+        anyhow::bail!("external terminal spawn not implemented for this platform");
+    }
+}
+
+fn spawn_external_terminal_simple(cmd: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // Run in a fresh Terminal window/tab.
+        let script = format!(
+            "tell application \"Terminal\" to do script \"{}\"",
+            cmd.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .spawn()
+            .context("osascript spawn")?;
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let candidates: &[&[&str]] = &[
+            &["x-terminal-emulator", "-e", "bash", "-lc"],
+            &["gnome-terminal", "--", "bash", "-lc"],
+            &["konsole", "-e", "bash", "-lc"],
+            &["xterm", "-e", "bash", "-lc"],
+            &["alacritty", "-e", "bash", "-lc"],
+            &["kitty", "bash", "-lc"],
+            &["wezterm", "start", "--", "bash", "-lc"],
+        ];
+        for argv in candidates {
+            if which::which(argv[0]).is_ok() {
+                let mut c = std::process::Command::new(argv[0]);
+                for a in &argv[1..] {
+                    c.arg(a);
+                }
+                c.arg(cmd);
+                if c.spawn().is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+        anyhow::bail!("no terminal emulator found in $PATH");
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = cmd;
         anyhow::bail!("external terminal spawn not implemented for this platform");
     }
 }
