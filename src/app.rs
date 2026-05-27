@@ -4,6 +4,7 @@ use crate::engagement::{
     CredKind, CredentialProfile, Engagement, JobRecord, JobStatus, Target,
 };
 use crate::exec::{Executor, FocusResult, SpawnRequest};
+use crate::input::{apply_to_string, apply_to_textarea, text_edit_action, TextEditAction};
 use crate::library::{CategoryFile, CommandEntry, CommandLibrary, CommandVariant};
 use crate::render::{self, RenderContext};
 use crate::ui::{self, splash::SplashState};
@@ -11,8 +12,9 @@ use crate::vim::{Action, KeyParser, Mode};
 
 use anyhow::{Context, Result};
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyboardEnhancementFlags,
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -28,29 +30,6 @@ use std::io::{Stdout, stdout};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-
-/// Terminals emit backspace as `Backspace`, DEL (`\x7f`), BS (`\x08`), or Ctrl-H.
-fn is_backspace_key(ke: &KeyEvent) -> bool {
-    match ke.code {
-        KeyCode::Backspace => true,
-        KeyCode::Char('\x7f') | KeyCode::Char('\x08') => true,
-        KeyCode::Char('h' | 'H') if ke.modifiers.contains(KeyModifiers::CONTROL) => true,
-        _ => false,
-    }
-}
-
-fn text_char(ke: &KeyEvent) -> Option<char> {
-    match ke.code {
-        KeyCode::Char(c)
-            if !ke.modifiers.contains(KeyModifiers::CONTROL)
-                && c != '\x7f'
-                && c != '\x08' =>
-        {
-            Some(c)
-        }
-        _ => None,
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -343,6 +322,12 @@ impl App {
     pub async fn run(&mut self) -> Result<()> {
         let mut stdout = stdout();
         enable_raw_mode().context("enable raw mode")?;
+        // Helps Linux terminals report Backspace/Delete as distinct keys instead of Ctrl-H.
+        execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )
+        .ok();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
             .context("enter alt screen")?;
         let backend = CrosstermBackend::new(stdout);
@@ -353,6 +338,7 @@ impl App {
         disable_raw_mode().ok();
         execute!(
             terminal.backend_mut(),
+            PopKeyboardEnhancementFlags,
             LeaveAlternateScreen,
             DisableMouseCapture
         )
@@ -639,13 +625,7 @@ impl App {
                 self.mode = Mode::Normal;
                 self.execute_palette(&cmd);
             }
-            _ => {
-                if is_backspace_key(&ke) {
-                    self.command_line_buf.pop();
-                } else if let Some(c) = text_char(&ke) {
-                    self.command_line_buf.push(c);
-                }
-            }
+            _ => apply_to_string(&mut self.command_line_buf, text_edit_action(&ke)),
         }
     }
 
@@ -707,11 +687,9 @@ impl App {
                 }
             }
             _ => {
-                if is_backspace_key(&ke) {
-                    self.search_buf.pop();
-                    self.recompute_search(global);
-                } else if let Some(c) = text_char(&ke) {
-                    self.search_buf.push(c);
+                let action = text_edit_action(&ke);
+                if !matches!(action, TextEditAction::None) {
+                    apply_to_string(&mut self.search_buf, action);
                     self.recompute_search(global);
                 }
             }
@@ -809,20 +787,19 @@ impl App {
                 self.mode = Mode::Normal;
             }
             KeyCode::Char('s') if ctrl => self.commit_edit_modal_run(),
-            KeyCode::Char('w') if ctrl => self.commit_edit_modal_save_prompt(),
+            KeyCode::Char('w') if ctrl && shift => self.commit_edit_modal_save_prompt(),
             KeyCode::Tab => {
                 self.handle_edit_path_tab(shift);
-            }
-            _ if is_backspace_key(&ke) => {
-                if let Modal::Edit(em) = &mut self.modal {
-                    em.path_suggestions.clear();
-                    em.textarea.delete_char();
-                }
             }
             _ => {
                 if let Modal::Edit(em) = &mut self.modal {
                     em.path_suggestions.clear();
-                    em.textarea.input(ke);
+                    let action = text_edit_action(&ke);
+                    if action == TextEditAction::None {
+                        em.textarea.input(ke);
+                    } else {
+                        apply_to_textarea(&mut em.textarea, action);
+                    }
                 }
             }
         }
@@ -848,14 +825,7 @@ impl App {
                     self.maybe_save_inline_edit_as(Some(id.as_str()));
                 }
             }
-            _ if is_backspace_key(&ke) => {
-                prompt.pop();
-            }
-            _ => {
-                if let Some(c) = text_char(&ke) {
-                    prompt.push(c);
-                }
-            }
+            _ => apply_to_string(prompt, text_edit_action(&ke)),
         }
     }
 
@@ -1024,14 +994,7 @@ impl App {
                         self.create_engagement(&name);
                     }
                 }
-                _ if is_backspace_key(&ke) => {
-                    prompt.pop();
-                }
-                _ => {
-                    if let Some(c) = text_char(&ke) {
-                        prompt.push(c);
-                    }
-                }
+                _ => apply_to_string(prompt, text_edit_action(&ke)),
             }
             return;
         }
@@ -1267,14 +1230,8 @@ impl App {
                     self.modal = Modal::Target(new_m);
                 }
                 _ => {
-                    if is_backspace_key(&ke) {
-                        if let Some((_, v)) = fields.get_mut(*focused) {
-                            v.pop();
-                        }
-                    } else if let Some(c) = text_char(&ke) {
-                        if let Some((_, v)) = fields.get_mut(*focused) {
-                            v.push(c);
-                        }
+                    if let Some((_, v)) = fields.get_mut(*focused) {
+                        apply_to_string(v, text_edit_action(&ke));
                     }
                 }
             },
@@ -1414,14 +1371,8 @@ impl App {
                     self.modal = Modal::Creds(new_m);
                 }
                 _ => {
-                    if is_backspace_key(&ke) {
-                        if let Some((_, v)) = fields.get_mut(*focused) {
-                            v.pop();
-                        }
-                    } else if let Some(c) = text_char(&ke) {
-                        if let Some((_, v)) = fields.get_mut(*focused) {
-                            v.push(c);
-                        }
+                    if let Some((_, v)) = fields.get_mut(*focused) {
+                        apply_to_string(v, text_edit_action(&ke));
                     }
                 }
             },

@@ -78,9 +78,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let hints = Paragraph::new(Line::from(vec![
         Span::styled("Tab", Theme::magenta()),
         Span::raw(" path  "),
+        Span::styled("Ctrl-H/U/W", Theme::magenta()),
+        Span::raw(" delete  "),
         Span::styled("Ctrl-S", Theme::magenta()),
         Span::raw(" run  "),
-        Span::styled("Ctrl-W", Theme::magenta()),
+        Span::styled("Ctrl-Shift-W", Theme::magenta()),
         Span::raw(" save  "),
         Span::styled("Esc", Theme::magenta()),
         Span::raw(" cancel"),

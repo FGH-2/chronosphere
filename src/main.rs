@@ -6,6 +6,7 @@ mod config;
 mod deploy;
 mod engagement;
 mod exec;
+mod input;
 mod library;
 mod mcp;
 mod path_complete;
