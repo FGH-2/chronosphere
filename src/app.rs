@@ -1644,8 +1644,23 @@ impl App {
                 }
             }
         };
-        match clipboard::copy(&text) {
-            Ok(()) => self.flash_ok(if raw { "yanked raw template".into() } else { "yanked resolved command".into() }),
+        match clipboard::copy_report(&text) {
+            Ok(r) if r.system_clipboard && r.tmux_buffer => self.flash_ok(if raw {
+                "yanked (system clipboard + tmux buffer)".into()
+            } else {
+                "yanked (system clipboard + tmux buffer)".into()
+            }),
+            Ok(r) if r.system_clipboard => self.flash_ok(if raw {
+                "yanked (system clipboard)".into()
+            } else {
+                "yanked (system clipboard)".into()
+            }),
+            Ok(r) if r.tmux_buffer => self.flash_ok(if raw {
+                "yanked (tmux buffer; paste with prefix ])".into()
+            } else {
+                "yanked (tmux buffer; paste with prefix ])".into()
+            }),
+            Ok(_) => self.flash_error("clipboard: no backend available".into()),
             Err(err) => self.flash_error(format!("clipboard: {}", err)),
         }
     }
