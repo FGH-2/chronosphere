@@ -1001,7 +1001,9 @@ impl App {
                 KeyCode::Backspace => {
                     prompt.pop();
                 }
-                KeyCode::Char(c) => prompt.push(c),
+                KeyCode::Char(c) if !ke.modifiers.contains(KeyModifiers::CONTROL) => {
+                    prompt.push(c);
+                }
                 _ => {}
             }
             return;
@@ -1212,7 +1214,7 @@ impl App {
                         v.pop();
                     }
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Char(c) if !ke.modifiers.contains(KeyModifiers::CONTROL) => {
                     if let Some((_, v)) = fields.get_mut(*focused) {
                         v.push(c);
                     }
@@ -1359,7 +1361,7 @@ impl App {
                         v.pop();
                     }
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Char(c) if !ke.modifiers.contains(KeyModifiers::CONTROL) => {
                     if let Some((_, v)) = fields.get_mut(*focused) {
                         v.push(c);
                     }
