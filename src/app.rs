@@ -788,6 +788,12 @@ impl App {
             KeyCode::Tab => {
                 self.handle_edit_path_tab(shift);
             }
+            KeyCode::Backspace => {
+                if let Modal::Edit(em) = &mut self.modal {
+                    em.path_suggestions.clear();
+                    em.textarea.delete_char();
+                }
+            }
             _ => {
                 if let Modal::Edit(em) = &mut self.modal {
                     em.path_suggestions.clear();
