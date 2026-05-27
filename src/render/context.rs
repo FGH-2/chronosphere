@@ -19,6 +19,12 @@ impl RenderContext {
                 .and_then(|t| t.ip.clone().or_else(|| t.hostname.clone())),
             "ip" => self.target.as_ref().and_then(|t| t.ip.clone()),
             "hostname" => self.target.as_ref().and_then(|t| t.hostname.clone()),
+            /// Hostname-first address for HTTP URLs (e.g. sub1.target.htb); falls back to IP.
+            "web_host" => self.web_host(),
+            "web_base" => self.web_base(false),
+            "web_base_https" => self.web_base(true),
+            /// Root domain for vhost/subdomain fuzz (e.g. target.htb). Override with -v vhost_root=...
+            "vhost_root" => self.vhost_root(),
             "dc" => self.target.as_ref().and_then(|t| t.dc_name.clone()),
             "dc_fqdn" => self.dc_fqdn(),
             "lhost" => self.target.as_ref().and_then(|t| t.lhost.clone()),
@@ -142,6 +148,35 @@ impl RenderContext {
         }
         let dom = self.profile.as_ref().and_then(|p| p.domain.clone())?;
         Some(format!("{}.{}", dc, dom))
+    }
+
+    /// Prefer hostname for web URLs so vhosts like sub1.target.htb resolve correctly.
+    fn web_host(&self) -> Option<String> {
+        self.target
+            .as_ref()
+            .and_then(|t| t.hostname.clone().or_else(|| t.ip.clone()))
+    }
+
+    fn web_base(&self, https: bool) -> Option<String> {
+        let host = self.web_host()?;
+        Some(format!(
+            "{}://{}",
+            if https { "https" } else { "http" },
+            host
+        ))
+    }
+
+    /// Domain suffix for `Host: FUZZ.<root>` style scans (sub1.target.htb → target.htb).
+    fn vhost_root(&self) -> Option<String> {
+        if let Some(v) = self.globals.get("vhost_root") {
+            return Some(v.clone());
+        }
+        let h = self.target.as_ref()?.hostname.as_ref()?;
+        let parts: Vec<&str> = h.split('.').collect();
+        if parts.len() <= 2 {
+            return Some(h.clone());
+        }
+        Some(parts[1..].join("."))
     }
 
     fn user_at_domain(&self) -> Option<String> {

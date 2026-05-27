@@ -123,6 +123,26 @@ mod tests {
     }
 
     #[test]
+    fn web_host_prefers_hostname() {
+        let out = render("curl -kI http://{web_host}", &ctx()).unwrap();
+        assert_eq!(out.resolved, "curl -kI http://DC01.CORP.LOCAL");
+    }
+
+    #[test]
+    fn web_base_builds_url() {
+        let out = render("feroxbuster -u {web_base}", &ctx()).unwrap();
+        assert_eq!(out.resolved, "feroxbuster -u http://DC01.CORP.LOCAL");
+    }
+
+    #[test]
+    fn vhost_root_strips_subdomain() {
+        let mut c = ctx();
+        c.target.as_mut().unwrap().hostname = Some("sub1.target.htb".into());
+        let out = render("Host: FUZZ.{vhost_root}", &c).unwrap();
+        assert_eq!(out.resolved, "Host: FUZZ.target.htb");
+    }
+
+    #[test]
     fn leaves_unknown_in_place_and_reports() {
         let out = render("nxc smb {target} {made_up}", &ctx()).unwrap();
         assert!(out.resolved.contains("{made_up}"));

