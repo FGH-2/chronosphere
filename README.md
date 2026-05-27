@@ -73,7 +73,7 @@ Inside the TUI, press `?` for the full keymap. The basics:
 | `R` | run every visible command (or every multi-selected one) |
 | `y` | yank resolved command to clipboard |
 | `Y` | yank raw template (with `{target}` etc.) |
-| `e` | edit inline; `<C-s>` fires the edited command, `<C-w>` saves as a new id |
+| `e` | edit inline; `Tab` completes filesystem paths; `<C-s>` fires the edited command, `<C-w>` saves as a new id |
 | `<space>` | toggle multi-select |
 | `mX` / `'X` | set / jump to mark X |
 | `/` | fuzzy search in the current category |

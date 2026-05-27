@@ -17,6 +17,7 @@ const HELP: &[(&str, &str)] = &[
     ("R", "run all multi-selected (or all visible in category)"),
     ("y / Y", "yank resolved / raw template to clipboard"),
     ("e", "inline edit the resolved command before running"),
+    ("Tab", "filesystem path completion (in editor)"),
     ("o", "focus the active job's tmux window"),
     ("Enter / L", "floating job log (jobs panel)"),
     ("]j / [j", "next / previous job"),

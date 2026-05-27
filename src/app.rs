@@ -209,6 +209,9 @@ pub struct EditModal {
     pub interactive: bool,
     pub category_id: String,
     pub save_as_prompt: Option<String>,
+    /// Tab-completion candidates for the current path token.
+    pub path_suggestions: Vec<String>,
+    pub path_pick: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -740,6 +743,7 @@ impl App {
             return;
         }
         let ctrl = ke.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = ke.modifiers.contains(KeyModifiers::SHIFT);
         match ke.code {
             KeyCode::Esc => {
                 self.modal = Modal::None;
@@ -747,8 +751,12 @@ impl App {
             }
             KeyCode::Char('s') if ctrl => self.commit_edit_modal_run(),
             KeyCode::Char('w') if ctrl => self.commit_edit_modal_save_prompt(),
+            KeyCode::Tab => {
+                self.handle_edit_path_tab(shift);
+            }
             _ => {
                 if let Modal::Edit(em) = &mut self.modal {
+                    em.path_suggestions.clear();
                     em.textarea.input(ke);
                 }
             }
@@ -1493,8 +1501,108 @@ impl App {
             interactive: cmd.interactive,
             category_id: cat_id,
             save_as_prompt: None,
+            path_suggestions: Vec::new(),
+            path_pick: 0,
         });
         self.mode = Mode::Insert;
+    }
+
+    fn edit_completion_roots(&self) -> Vec<PathBuf> {
+        let engagement_dir = self.engagement.as_ref().map(|e| e.dir.as_path());
+        crate::path_complete::completion_roots(engagement_dir)
+    }
+
+    fn handle_edit_path_tab(&mut self, backwards: bool) {
+        let roots = self.edit_completion_roots();
+        let flash = {
+            let Modal::Edit(em) = &mut self.modal else {
+                return;
+            };
+            let (row, col) = em.textarea.cursor();
+            let col = col as usize;
+            let line = em.textarea.lines().get(row).cloned().unwrap_or_default();
+
+            let Some(token) = crate::path_complete::token_at_cursor(&line, col) else {
+                em.path_suggestions.clear();
+                em.textarea.insert_tab();
+                return;
+            };
+            if !crate::path_complete::looks_like_path(&token.text, &line, token.start) {
+                em.path_suggestions.clear();
+                em.textarea.insert_tab();
+                return;
+            }
+
+            let candidates = crate::path_complete::completions(&token.text, &roots);
+            if candidates.is_empty() {
+                em.path_suggestions.clear();
+                Some(Err("no path matches".into()))
+            } else {
+                let same_menu = em.path_suggestions == candidates;
+                if !same_menu {
+                    em.path_suggestions = candidates;
+                    em.path_pick = 0;
+                    if em.path_suggestions.len() == 1 {
+                        let choice = em.path_suggestions[0].clone();
+                        crate::path_complete::replace_token(
+                            &mut em.textarea,
+                            row,
+                            token.start,
+                            token.end,
+                            &choice,
+                        );
+                        em.path_suggestions.clear();
+                        None
+                    } else {
+                        let lcp =
+                            crate::path_complete::longest_common_prefix(&em.path_suggestions);
+                        if lcp.len() > token.text.len() {
+                            crate::path_complete::replace_token(
+                                &mut em.textarea,
+                                row,
+                                token.start,
+                                token.end,
+                                &lcp,
+                            );
+                            Some(Ok(format!(
+                                "{} matches — Tab to cycle",
+                                em.path_suggestions.len()
+                            )))
+                        } else {
+                            Some(Ok(format!(
+                                "{} matches — Tab/Shift-Tab to cycle",
+                                em.path_suggestions.len()
+                            )))
+                        }
+                    }
+                } else {
+                    let len = em.path_suggestions.len();
+                    em.path_pick = if backwards {
+                        (em.path_pick + len - 1) % len
+                    } else {
+                        (em.path_pick + 1) % len
+                    };
+                    let choice = em.path_suggestions[em.path_pick].clone();
+                    let (row, col) = em.textarea.cursor();
+                    let line = em.textarea.lines().get(row).cloned().unwrap_or_default();
+                    let token =
+                        crate::path_complete::token_at_cursor(&line, col as usize).unwrap_or(token);
+                    crate::path_complete::replace_token(
+                        &mut em.textarea,
+                        row,
+                        token.start,
+                        token.end,
+                        &choice,
+                    );
+                    None
+                }
+            }
+        };
+        match flash {
+            Some(Ok(msg)) => self.flash_ok(msg),
+            Some(Err(msg)) => self.flash_error(msg),
+            None => {}
+        }
     }
 
     fn yank(&mut self, raw: bool) {

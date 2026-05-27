@@ -8,6 +8,7 @@ mod engagement;
 mod exec;
 mod library;
 mod mcp;
+mod path_complete;
 mod render;
 mod ui;
 mod vim;
