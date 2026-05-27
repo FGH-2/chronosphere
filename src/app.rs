@@ -29,6 +29,29 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
+/// Terminals emit backspace as `Backspace`, DEL (`\x7f`), BS (`\x08`), or Ctrl-H.
+fn is_backspace_key(ke: &KeyEvent) -> bool {
+    match ke.code {
+        KeyCode::Backspace => true,
+        KeyCode::Char('\x7f') | KeyCode::Char('\x08') => true,
+        KeyCode::Char('h' | 'H') if ke.modifiers.contains(KeyModifiers::CONTROL) => true,
+        _ => false,
+    }
+}
+
+fn text_char(ke: &KeyEvent) -> Option<char> {
+    match ke.code {
+        KeyCode::Char(c)
+            if !ke.modifiers.contains(KeyModifiers::CONTROL)
+                && c != '\x7f'
+                && c != '\x08' =>
+        {
+            Some(c)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Categories,
@@ -616,11 +639,13 @@ impl App {
                 self.mode = Mode::Normal;
                 self.execute_palette(&cmd);
             }
-            KeyCode::Backspace => {
-                self.command_line_buf.pop();
+            _ => {
+                if is_backspace_key(&ke) {
+                    self.command_line_buf.pop();
+                } else if let Some(c) = text_char(&ke) {
+                    self.command_line_buf.push(c);
+                }
             }
-            KeyCode::Char(c) => self.command_line_buf.push(c),
-            _ => {}
         }
     }
 
@@ -667,10 +692,6 @@ impl App {
             KeyCode::Enter => {
                 self.commit_search_selection();
             }
-            KeyCode::Backspace => {
-                self.search_buf.pop();
-                self.recompute_search(global);
-            }
             KeyCode::Down => {
                 if let Modal::Search { matches, cursor, .. } = &mut self.modal {
                     if !matches.is_empty() && *cursor + 1 < matches.len() {
@@ -685,11 +706,15 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(c) => {
-                self.search_buf.push(c);
-                self.recompute_search(global);
+            _ => {
+                if is_backspace_key(&ke) {
+                    self.search_buf.pop();
+                    self.recompute_search(global);
+                } else if let Some(c) = text_char(&ke) {
+                    self.search_buf.push(c);
+                    self.recompute_search(global);
+                }
             }
-            _ => {}
         }
     }
 
@@ -788,7 +813,7 @@ impl App {
             KeyCode::Tab => {
                 self.handle_edit_path_tab(shift);
             }
-            KeyCode::Backspace => {
+            _ if is_backspace_key(&ke) => {
                 if let Modal::Edit(em) = &mut self.modal {
                     em.path_suggestions.clear();
                     em.textarea.delete_char();
@@ -823,13 +848,14 @@ impl App {
                     self.maybe_save_inline_edit_as(Some(id.as_str()));
                 }
             }
-            KeyCode::Backspace => {
+            _ if is_backspace_key(&ke) => {
                 prompt.pop();
             }
-            KeyCode::Char(c) if !ke.modifiers.contains(KeyModifiers::CONTROL) => {
-                prompt.push(c);
+            _ => {
+                if let Some(c) = text_char(&ke) {
+                    prompt.push(c);
+                }
             }
-            _ => {}
         }
     }
 
@@ -998,13 +1024,14 @@ impl App {
                         self.create_engagement(&name);
                     }
                 }
-                KeyCode::Backspace => {
+                _ if is_backspace_key(&ke) => {
                     prompt.pop();
                 }
-                KeyCode::Char(c) if !ke.modifiers.contains(KeyModifiers::CONTROL) => {
-                    prompt.push(c);
+                _ => {
+                    if let Some(c) = text_char(&ke) {
+                        prompt.push(c);
+                    }
                 }
-                _ => {}
             }
             return;
         }
@@ -1209,16 +1236,6 @@ impl App {
                         *focused - 1
                     };
                 }
-                KeyCode::Backspace => {
-                    if let Some((_, v)) = fields.get_mut(*focused) {
-                        v.pop();
-                    }
-                }
-                KeyCode::Char(c) if !ke.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some((_, v)) = fields.get_mut(*focused) {
-                        v.push(c);
-                    }
-                }
                 KeyCode::Enter => {
                     let new_target = match fields_to_target(fields) {
                         Ok(t) => t,
@@ -1249,7 +1266,17 @@ impl App {
                     };
                     self.modal = Modal::Target(new_m);
                 }
-                _ => {}
+                _ => {
+                    if is_backspace_key(&ke) {
+                        if let Some((_, v)) = fields.get_mut(*focused) {
+                            v.pop();
+                        }
+                    } else if let Some(c) = text_char(&ke) {
+                        if let Some((_, v)) = fields.get_mut(*focused) {
+                            v.push(c);
+                        }
+                    }
+                }
             },
         }
     }
@@ -1356,16 +1383,6 @@ impl App {
                         *focused - 1
                     };
                 }
-                KeyCode::Backspace => {
-                    if let Some((_, v)) = fields.get_mut(*focused) {
-                        v.pop();
-                    }
-                }
-                KeyCode::Char(c) if !ke.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some((_, v)) = fields.get_mut(*focused) {
-                        v.push(c);
-                    }
-                }
                 KeyCode::Enter => {
                     let prof = match fields_to_profile(fields) {
                         Ok(p) => p,
@@ -1396,7 +1413,17 @@ impl App {
                     };
                     self.modal = Modal::Creds(new_m);
                 }
-                _ => {}
+                _ => {
+                    if is_backspace_key(&ke) {
+                        if let Some((_, v)) = fields.get_mut(*focused) {
+                            v.pop();
+                        }
+                    } else if let Some(c) = text_char(&ke) {
+                        if let Some((_, v)) = fields.get_mut(*focused) {
+                            v.push(c);
+                        }
+                    }
+                }
             },
         }
     }
