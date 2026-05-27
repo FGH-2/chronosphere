@@ -1645,22 +1645,8 @@ impl App {
             }
         };
         match clipboard::copy_report(&text) {
-            Ok(r) if r.system_clipboard && r.tmux_buffer => self.flash_ok(if raw {
-                "yanked (system clipboard + tmux buffer)".into()
-            } else {
-                "yanked (system clipboard + tmux buffer)".into()
-            }),
-            Ok(r) if r.system_clipboard => self.flash_ok(if raw {
-                "yanked (system clipboard)".into()
-            } else {
-                "yanked (system clipboard)".into()
-            }),
-            Ok(r) if r.tmux_buffer => self.flash_ok(if raw {
-                "yanked (tmux buffer; paste with prefix ])".into()
-            } else {
-                "yanked (tmux buffer; paste with prefix ])".into()
-            }),
-            Ok(_) => self.flash_error("clipboard: no backend available".into()),
+            Ok(r) if r.any() => self.flash_ok(clipboard::format_yank_message(&r)),
+            Ok(_) => self.flash_error("yank failed — install xclip or wl-clipboard on Linux".into()),
             Err(err) => self.flash_error(format!("clipboard: {}", err)),
         }
     }

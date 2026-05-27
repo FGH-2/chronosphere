@@ -405,8 +405,12 @@ alias chronosphere='{bin}'
             } else {
                 resolve(&root, cli.engagement.as_deref(), &cli.target, &cli.creds, &id, &[])?
             };
-            crate::clipboard::copy(&text)?;
-            println!("yanked: {}", id);
+            let r = crate::clipboard::copy_report(&text)?;
+            println!("{}", crate::clipboard::format_yank_message(&r));
+            if !r.any() {
+                anyhow::bail!("clipboard copy failed");
+            }
+            println!("id: {}", id);
             Ok(true)
         }
         Command::Run { id, vars, dry_run } => {
