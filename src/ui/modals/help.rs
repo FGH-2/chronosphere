@@ -15,7 +15,7 @@ const HELP: &[(&str, &str)] = &[
     ("Nr (e.g. 5r)", "run command N times in parallel"),
     ("space", "toggle multi-select on highlighted command"),
     ("R", "run all multi-selected (or all visible in category)"),
-    ("y / Y", "yank command (tmux: Ctrl-b ]; Linux: xclip; fallback: ~/.local/share/.../last_yank.txt)"),
+    ("y / Y", "yank — paste in another tmux pane: Ctrl-b ]; or cat ~/.local/share/chronosphere/last_yank.txt"),
     ("e", "inline edit the resolved command before running"),
     ("Tab", "filesystem path completion (in editor)"),
     ("o", "focus the active job's tmux window"),

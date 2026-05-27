@@ -1,23 +1,26 @@
 use crate::config;
 use anyhow::{Context, Result};
+use base64::Engine;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-/// Name of the tmux paste buffer used for `y` yank (paste with prefix `]` or `paste-buffer -b chronosphere`).
-pub const TMUX_BUFFER_NAME: &str = "chronosphere";
-
 #[derive(Debug, Clone, Default)]
 pub struct CopyReport {
     pub system_clipboard: bool,
-    /// tmux internal paste buffer (prefix `]`), NOT the same as `-w` / system clipboard.
+    /// tmux automatic paste buffer (prefix `]` in a normal pane — not inside Chronosphere).
     pub tmux_buffer: bool,
+    /// OSC 52 — copies to your **terminal app's** clipboard (works over SSH on iTerm2, Ghostty, etc.).
+    pub terminal_clipboard: bool,
     pub file_path: Option<PathBuf>,
 }
 
 impl CopyReport {
     pub fn any(&self) -> bool {
-        self.system_clipboard || self.tmux_buffer || self.file_path.is_some()
+        self.system_clipboard
+            || self.tmux_buffer
+            || self.terminal_clipboard
+            || self.file_path.is_some()
     }
 }
 
@@ -27,28 +30,45 @@ pub fn last_yank_path() -> PathBuf {
 
 pub fn format_yank_message(r: &CopyReport) -> String {
     let mut parts = Vec::new();
+    if r.terminal_clipboard {
+        parts.push("terminal clipboard (Cmd/Ctrl+V here)");
+    }
     if r.system_clipboard {
-        parts.push("system clipboard");
+        parts.push("Kali desktop clipboard");
     }
     if r.tmux_buffer {
-        parts.push("tmux buffer (Ctrl-b ])");
+        parts.push("tmux buffer");
     }
-    if let Some(p) = &r.file_path {
-        parts.push("saved to file");
-        return if parts.len() == 1 {
-            format!("yanked → {} (also: cat {})", parts[0], p.display())
-        } else {
-            format!(
-                "yanked → {} (also: cat {})",
-                parts.join(" + "),
-                p.display()
-            )
-        }
-    }
-    if parts.is_empty() {
-        "yank failed — no clipboard backend".to_string()
+
+    let file_hint = r
+        .file_path
+        .as_ref()
+        .map(|p| format!("cat {}", p.display()));
+
+    let paste_hint = if r.tmux_buffer {
+        "paste: open another tmux pane, then Ctrl-b ] (won't work inside Chronosphere)"
+    } else if r.terminal_clipboard {
+        "paste: Cmd/Ctrl+V in this terminal"
+    } else if r.system_clipboard {
+        "paste: Shift+Insert in a normal shell on Kali (not your laptop if SSH)"
     } else {
-        format!("yanked → {}", parts.join(" + "))
+        ""
+    };
+
+    match (parts.is_empty(), file_hint) {
+        (true, Some(path)) => format!("yanked → file only — {path}"),
+        (false, Some(path)) if paste_hint.is_empty() => {
+            format!("yanked → {} — also {path}", parts.join(" + "))
+        }
+        (false, Some(path)) => format!(
+            "yanked → {} — {paste_hint} — fallback: {path}",
+            parts.join(" + ")
+        ),
+        (false, None) if !paste_hint.is_empty() => {
+            format!("yanked → {} — {paste_hint}", parts.join(" + "))
+        }
+        (false, None) => format!("yanked → {}", parts.join(" + ")),
+        (true, None) => "yank failed — no clipboard backend".to_string(),
     }
 }
 
@@ -69,22 +89,17 @@ fn pipe_to_command(cmd: &mut Command, text: &str) -> Result<bool> {
     Ok(child.wait().context("wait clipboard command")?.success())
 }
 
-/// tmux paste buffer (what `paste-buffer` / prefix `]` uses). Do NOT pass `-w` here.
+/// tmux **automatic** paste buffer (what prefix `]` / `paste-buffer` uses). Do NOT use `-b` or `-w`.
 fn copy_to_tmux_paste_buffer(text: &str) -> Result<()> {
     if !tmux_available() {
         anyhow::bail!("tmux not in PATH");
     }
 
-    // Prefer load-buffer from a temp file (handles multiline / special chars reliably).
+    // load-buffer without -b → top automatic buffer (see tmux(1) load-buffer).
     let tmp = std::env::temp_dir().join(format!("chronosphere-yank-{}.txt", std::process::id()));
     std::fs::write(&tmp, text).context("write temp yank file")?;
     let loaded = Command::new("tmux")
-        .args([
-            "load-buffer",
-            "-b",
-            TMUX_BUFFER_NAME,
-            tmp.to_str().context("temp path utf8")?,
-        ])
+        .args(["load-buffer", tmp.to_str().context("temp path utf8")?])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -96,23 +111,39 @@ fn copy_to_tmux_paste_buffer(text: &str) -> Result<()> {
         return Ok(());
     }
 
-    // Fallback: stdin → default buffer, then copy to named buffer.
     if !pipe_to_command(
         &mut Command::new("tmux").args(["set-buffer", "-"]),
         text,
     )? {
         anyhow::bail!("tmux set-buffer failed");
     }
-    let _ = Command::new("tmux")
-        .args(["copy-buffer", "-b", TMUX_BUFFER_NAME])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
     Ok(())
+}
+
+/// OSC 52: ask the terminal emulator to place text on the **local** clipboard (SSH-friendly).
+fn copy_terminal_osc52(text: &str) -> bool {
+    const MAX_BYTES: usize = 48_000;
+    if text.len() > MAX_BYTES {
+        return false;
+    }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    let seq = format!("\x1b]52;c;{b64}\x07");
+    std::io::stderr()
+        .write_all(seq.as_bytes())
+        .and_then(|_| std::io::stderr().flush())
+        .is_ok()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_clipboard_env_available() -> bool {
+    std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
 #[cfg(target_os = "linux")]
 fn copy_system_clipboard_linux(text: &str) -> bool {
+    if !linux_clipboard_env_available() {
+        return false;
+    }
     if which::which("xclip").is_ok() {
         for sel in ["clipboard", "primary"] {
             if pipe_to_command(
@@ -152,6 +183,10 @@ fn copy_system_clipboard_linux(text: &str) -> bool {
 }
 
 fn copy_system_clipboard(text: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    if !linux_clipboard_env_available() {
+        return false;
+    }
     if let Ok(mut cb) = arboard::Clipboard::new() {
         if cb.set_text(text.to_string()).is_ok() {
             return true;
@@ -187,11 +222,14 @@ pub fn copy(text: &str) -> Result<()> {
 pub fn copy_report(text: &str) -> Result<CopyReport> {
     let mut r = CopyReport::default();
 
+    if copy_terminal_osc52(text) {
+        r.terminal_clipboard = true;
+    }
+
     if copy_system_clipboard(text) {
         r.system_clipboard = true;
     }
 
-    // Always try tmux paste buffer when tmux exists (works even if Chronosphere is not inside tmux).
     if tmux_available() {
         if copy_to_tmux_paste_buffer(text).is_ok() {
             r.tmux_buffer = true;
@@ -212,11 +250,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_message_includes_tmux_hint() {
+    fn format_message_includes_tmux_paste_hint() {
         let msg = format_yank_message(&CopyReport {
             tmux_buffer: true,
             ..Default::default()
         });
-        assert!(msg.contains("tmux buffer"));
+        assert!(msg.contains("tmux"));
+        assert!(msg.contains("Ctrl-b ]"));
     }
 }
