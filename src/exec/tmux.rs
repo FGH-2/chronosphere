@@ -124,3 +124,21 @@ pub fn kill_window(session: Option<&str>, window_id: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Capture the visible pane contents (plus scrollback) of a window/pane target.
+/// `target` is typically a window id like `@5`.
+pub fn capture_pane(target: &str, start: i32) -> Result<Vec<String>> {
+    let mut cmd = Command::new("tmux");
+    cmd.args(["capture-pane", "-p", "-t", target, "-S", &start.to_string()]);
+    let out = cmd.output().context("tmux capture-pane")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "tmux capture-pane failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|s| s.to_string())
+        .collect())
+}

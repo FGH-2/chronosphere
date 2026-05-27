@@ -1,5 +1,6 @@
 use crate::app::{App, JobLogModal, Modal};
 use crate::engagement::{JobRecord, JobStatus};
+use crate::exec::tmux;
 use crate::ui::centered_rect;
 use crate::ui::theme::Theme;
 use ratatui::Frame;
@@ -41,6 +42,19 @@ pub fn refresh_modal_from_job(modal: &mut JobLogModal, job: &JobRecord) {
     modal.title = job.command_title.clone();
     modal.status = job.status;
     modal.exit_code = job.exit_code;
+
+    if let Some(wid) = job.tmux_window.as_deref() {
+        // Prefer tmux capture when available: shows exactly what the job's window shows,
+        // including interactive progress output.
+        if tmux::has_tmux() {
+            if let Ok(lines) = tmux::capture_pane(wid, -5000) {
+                modal.lines = lines;
+                modal.read_offset = 0;
+                modal.pending_line.clear();
+                return;
+            }
+        }
+    }
 
     let Some(path) = job.log_path.as_ref() else {
         modal.lines = vec!["(no log path for this job)".to_string()];
@@ -170,11 +184,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Clear, popup);
 
     let status_label = format!("{:?}", modal.status).to_lowercase();
+    let backend = if app
+        .jobs
+        .iter()
+        .find(|j| j.id == modal.job_id)
+        .and_then(|j| j.tmux_window.as_ref())
+        .is_some()
+        && tmux::has_tmux()
+    {
+        "tmux"
+    } else {
+        "log"
+    };
     let follow = if modal.follow { "follow" } else { "scroll" };
     let title = format!(
-        " job: {}  [{}]  {}{} ",
+        " job: {}  [{}]  {}  {}{} ",
         truncate(&modal.title, 40),
         status_label,
+        backend,
         follow,
         modal
             .exit_code

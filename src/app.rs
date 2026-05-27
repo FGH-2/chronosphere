@@ -268,6 +268,9 @@ pub struct App {
     pub jobs: Vec<JobRecord>,
 
     pub flash: Option<FlashMessage>,
+
+    /// When set, the next frame does a full terminal clear to avoid modal artifacts.
+    pub needs_full_redraw: bool,
     pub splash: Option<SplashState>,
     pub running: bool,
 
@@ -307,6 +310,7 @@ impl App {
             _watcher: None,
             library_reload_pending: false,
             library_reload_rx: None,
+            needs_full_redraw: false,
         };
         app.try_open_last_engagement().await;
         app.setup_library_watcher();
@@ -341,6 +345,10 @@ impl App {
         let mut events = EventStream::new();
 
         while self.running {
+            if self.needs_full_redraw {
+                terminal.clear().ok();
+                self.needs_full_redraw = false;
+            }
             terminal.draw(|f| ui::draw(f, self))?;
             // While the splash animation is on screen we tick ≈16 fps for smooth
             // motion; once dismissed we drop back to 2 Hz to keep job polling cheap.
@@ -354,9 +362,17 @@ impl App {
             let sleep = tokio::time::sleep(Duration::from_millis(tick_ms));
             tokio::select! {
                 ev = events.next() => {
-                    if let Some(Ok(Event::Key(ke))) = ev {
-                        if ke.kind == KeyEventKind::Press {
-                            self.handle_key(ke);
+                    if let Some(Ok(event)) = ev {
+                        match event {
+                            Event::Key(ke) => {
+                                if ke.kind == KeyEventKind::Press {
+                                    self.handle_key(ke);
+                                }
+                            }
+                            Event::Resize(_, _) => {
+                                self.needs_full_redraw = true;
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -1692,6 +1708,7 @@ impl App {
         match ke.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.modal = Modal::None;
+                self.needs_full_redraw = true;
                 return;
             }
             KeyCode::Char('o') => {
