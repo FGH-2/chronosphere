@@ -204,11 +204,22 @@ fn window_name_for(req: &SpawnRequest) -> String {
 }
 
 fn background_wrapper(cmd: &str, log_path: &str, status_path: &str) -> String {
-    // The user-facing shell stays open after the command finishes so they can grep/scroll the
-    // output, but a sentinel status file is written so chronosphere can detect completion.
+    // Run under a pseudo-TTY via `script` so tools like ffuf line-buffer progress instead of
+    // block-buffering when piped through `tee`. Fall back to tee when script is unavailable.
+    let inner = shell_escape(&format!("{{ {cmd}; }}"));
     format!(
-        "{{ {cmd}; }} 2>&1 | tee -a {log}; echo $? > {status}; echo; echo '[chronosphere] command finished. Press Up to recall.'; exec ${{SHELL:-bash}}",
+        r#"if command -v script >/dev/null 2>&1; then
+  script -q -c {inner} {log}
+else
+  {{ {cmd}; }} 2>&1 | tee -a {log}
+fi
+ec=$?
+echo "$ec" > {status}
+echo
+echo '[chronosphere] command finished (exit '"$ec"'). Press Up to recall.'
+exec ${{SHELL:-bash}}"#,
         cmd = cmd,
+        inner = inner,
         log = shell_escape(log_path),
         status = shell_escape(status_path),
     )

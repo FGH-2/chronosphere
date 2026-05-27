@@ -200,6 +200,12 @@ pub struct JobLogModal {
     pub lines: Vec<String>,
     pub scroll: usize,
     pub follow: bool,
+    /// Byte offset in the log file for incremental tailing.
+    pub read_offset: u64,
+    /// Incomplete trailing line from the last tail read.
+    pub pending_line: String,
+    /// Last render viewport height (lines), used to clamp scroll in the key handler.
+    pub last_visible_lines: usize,
 }
 
 pub struct EditModal {
@@ -378,6 +384,18 @@ impl App {
 
     fn tick(&mut self) {
         self.poll_jobs();
+        self.refresh_job_log_modal();
+    }
+
+    fn refresh_job_log_modal(&mut self) {
+        let Modal::JobLog(modal) = &mut self.modal else {
+            return;
+        };
+        let job = self.jobs.iter().find(|j| j.id == modal.job_id).cloned();
+        if let Some(job) = job {
+            ui::modals::job_log::refresh_modal_from_job(modal, &job);
+            ui::modals::job_log::clamp_scroll(modal, modal.last_visible_lines);
+        }
     }
 
     fn poll_jobs(&mut self) {
@@ -1657,12 +1675,16 @@ impl App {
             lines,
             scroll: 0,
             follow,
+            read_offset: 0,
+            pending_line: String::new(),
+            last_visible_lines: 1,
         });
     }
 
     fn handle_job_log_modal_key(&mut self, ke: KeyEvent) {
-        let Modal::JobLog(modal) = &mut self.modal else {
-            return;
+        let job_id = match &self.modal {
+            Modal::JobLog(m) => m.job_id.clone(),
+            _ => return,
         };
         let ctrl = ke.modifiers.contains(KeyModifiers::CONTROL);
         let page = 12usize;
@@ -1670,10 +1692,28 @@ impl App {
         match ke.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.modal = Modal::None;
+                return;
             }
+            KeyCode::Char('o') => {
+                self.focus_job_by_id(&job_id);
+                return;
+            }
+            _ => {}
+        }
+
+        let Modal::JobLog(modal) = &mut self.modal else {
+            return;
+        };
+        if let Some(job) = self.jobs.iter().find(|j| j.id == job_id) {
+            ui::modals::job_log::refresh_modal_from_job(modal, job);
+        }
+        let vis = modal.last_visible_lines.max(1);
+
+        match ke.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 modal.follow = false;
-                modal.scroll = modal.scroll.saturating_add(1);
+                let max = ui::modals::job_log::max_scroll(modal, vis);
+                modal.scroll = (modal.scroll + 1).min(max);
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 modal.follow = false;
@@ -1681,7 +1721,8 @@ impl App {
             }
             KeyCode::Char('d') if ctrl => {
                 modal.follow = false;
-                modal.scroll = modal.scroll.saturating_add(page);
+                let max = ui::modals::job_log::max_scroll(modal, vis);
+                modal.scroll = (modal.scroll + page).min(max);
             }
             KeyCode::Char('u') if ctrl => {
                 modal.follow = false;
@@ -1692,23 +1733,22 @@ impl App {
                 modal.scroll = 0;
             }
             KeyCode::Char('G') => {
-                modal.follow = matches!(
-                    self.jobs
-                        .iter()
-                        .find(|j| j.id == modal.job_id)
-                        .map(|j| j.status),
-                    Some(JobStatus::Running)
-                );
-                modal.scroll = usize::MAX;
+                modal.follow = self
+                    .jobs
+                    .iter()
+                    .find(|j| j.id == job_id)
+                    .is_some_and(|j| j.status == JobStatus::Running);
+                modal.scroll = ui::modals::job_log::max_scroll(modal, vis);
             }
             KeyCode::Char('f') => {
                 modal.follow = !modal.follow;
-            }
-            KeyCode::Char('o') => {
-                self.open_active_job();
+                if modal.follow {
+                    modal.scroll = ui::modals::job_log::max_scroll(modal, vis);
+                }
             }
             _ => {}
         }
+        ui::modals::job_log::clamp_scroll(modal, vis);
     }
 
     fn selected_job_record(&self) -> Option<&JobRecord> {
@@ -1716,16 +1756,26 @@ impl App {
     }
 
     fn open_active_job(&mut self) {
+        let job_id = match self.selected_job_record().map(|j| j.id.clone()) {
+            Some(id) => id,
+            None => return,
+        };
+        self.focus_job_by_id(&job_id);
+    }
+
+    fn focus_job_by_id(&mut self, job_id: &str) {
         let exe = match self.executor.as_ref() {
             Some(e) => e,
             None => return,
         };
-        let job = match self.selected_job_record() {
+        let job = match self.jobs.iter().find(|j| j.id == job_id) {
             Some(j) => j.clone(),
             None => return,
         };
         match exe.focus_job(&job) {
-            Ok(FocusResult::Focused) => self.flash_ok(format!("focused window {}", job.tmux_window.unwrap_or_default())),
+            Ok(FocusResult::Focused) => {
+                self.flash_ok(format!("focused window {}", job.tmux_window.unwrap_or_default()))
+            }
             Ok(FocusResult::AttachCommand(cmd)) => {
                 if let Err(err) = clipboard::copy(&cmd) {
                     tracing::warn!(?err, "clipboard");

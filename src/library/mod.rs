@@ -150,16 +150,13 @@ mod tests {
 
     fn extract_helper_names(template: &str) -> Vec<String> {
         let mut names = Vec::new();
-        let bytes = template.as_bytes();
-        let mut i = 0;
-        while i + 4 < bytes.len() {
-            if &template[i..i + 5] == "${fn:" {
-                let after = &template[i + 5..];
-                if let Some(lp) = after.find('(') {
-                    names.push(after[..lp].trim().to_string());
-                }
+        let mut rest = template;
+        while let Some(idx) = rest.find("${fn:") {
+            let after = &rest[idx + 5..];
+            if let Some(lp) = after.find('(') {
+                names.push(after[..lp].trim().to_string());
             }
-            i += 1;
+            rest = &rest[idx + 1..];
         }
         names
     }
