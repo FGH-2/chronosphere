@@ -92,7 +92,7 @@ when = "creds.kind == 'kerberos' and creds.has_domain"
 [[command]]
 id = "mssql.nxc.spray"
 title = "nxc mssql — password spray"
-template = "nxc mssql {target} -u users.txt -p 'Spring2025!' --continue-on-success"
+template = "nxc mssql {target} -u users.txt -p '{spray_password}' --continue-on-success"
 requires = ["nxc"]
 tags = ["spray", "nxc", "noisy"]
 

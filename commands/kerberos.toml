@@ -14,7 +14,7 @@ when = "target.has_dc"
 [[command]]
 id = "krb.kerbrute.passwordspray"
 title = "kerbrute passwordspray"
-template = "kerbrute passwordspray -d {domain} --dc {dc} users.txt 'Spring2025!'"
+template = "kerbrute passwordspray -d {domain} --dc {dc} users.txt '{spray_password}'"
 requires = ["kerbrute"]
 tags = ["spray", "noisy"]
 when = "target.has_dc"

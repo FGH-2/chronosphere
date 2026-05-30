@@ -45,7 +45,7 @@ tags = ["serve", "delivery"]
 [[command]]
 id = "rs.serve.smbserver"
 title = "impacket smbserver"
-template = "impacket-smbserver share $(pwd) -smb2support -username chrono -password chronopass"
+template = "impacket-smbserver share $(pwd) -smb2support -username {smb_server_user} -password {smb_server_password}"
 requires = ["impacket-smbserver"]
 tags = ["serve", "smb"]
 
