@@ -1,12 +1,14 @@
 pub mod ap;
 pub mod creds;
 pub mod history;
+pub mod pivot;
 pub mod target;
 pub mod variables;
 
 pub use ap::{AccessPoint, ApStore};
 pub use creds::{CredKind, CredentialProfile, ProfileStore};
 pub use history::{HistoryStore, JobRecord, JobStatus};
+pub use pivot::{ExecutionMode, Pivot, PivotStore};
 pub use target::{Target, TargetStore};
 pub use variables::VariableStore;
 
@@ -23,12 +25,13 @@ pub struct EngagementMeta {
     pub notes: Option<String>,
 }
 
-/// A loaded engagement: targets, APs, cred profiles, variables, and job history.
+/// A loaded engagement: targets, APs, pivots, cred profiles, variables, and job history.
 pub struct Engagement {
     pub meta: EngagementMeta,
     pub dir: PathBuf,
     pub targets: TargetStore,
     pub aps: ApStore,
+    pub pivots: PivotStore,
     pub profiles: ProfileStore,
     pub variables: VariableStore,
     pub history: HistoryStore,
@@ -43,6 +46,12 @@ impl Engagement {
     }
     pub fn aps_path(dir: &Path) -> PathBuf {
         dir.join("aps.json")
+    }
+    pub fn pivots_path(dir: &Path) -> PathBuf {
+        dir.join("pivots.json")
+    }
+    pub fn ssh_dir(dir: &Path) -> PathBuf {
+        dir.join(".ssh")
     }
     pub fn creds_path(dir: &Path) -> PathBuf {
         dir.join("creds.json")
@@ -89,6 +98,8 @@ impl Engagement {
         targets.save(&Self::targets_path(&dir))?;
         let aps = ApStore::new();
         aps.save(&Self::aps_path(&dir))?;
+        let pivots = PivotStore::new();
+        pivots.save(&Self::pivots_path(&dir))?;
         let profiles = ProfileStore::new();
         profiles.save(&Self::creds_path(&dir))?;
         let variables = VariableStore::new();
@@ -100,6 +111,7 @@ impl Engagement {
             dir,
             targets,
             aps,
+            pivots,
             profiles,
             variables,
             history,
@@ -120,6 +132,10 @@ impl Engagement {
             tracing::warn!(?err, "could not load aps.json; starting fresh");
             ApStore::new()
         });
+        let pivots = PivotStore::load(&Self::pivots_path(&dir)).unwrap_or_else(|err| {
+            tracing::warn!(?err, "could not load pivots.json; starting fresh");
+            PivotStore::new()
+        });
         let profiles = ProfileStore::load(&Self::creds_path(&dir)).unwrap_or_else(|err| {
             tracing::warn!(?err, "could not load creds.json; starting fresh");
             ProfileStore::new()
@@ -136,6 +152,7 @@ impl Engagement {
             dir,
             targets,
             aps,
+            pivots,
             profiles,
             variables,
             history,
@@ -164,6 +181,12 @@ impl Engagement {
     pub fn active_ap(&self) -> Option<&AccessPoint> {
         self.aps.active()
     }
+    pub fn active_pivot_tunnel(&self) -> Option<&Pivot> {
+        self.pivots.active_tunnel()
+    }
+    pub fn active_pivot_remote(&self) -> Option<&Pivot> {
+        self.pivots.active_remote()
+    }
     pub fn active_profile(&self) -> Option<&CredentialProfile> {
         self.profiles.active()
     }
@@ -173,6 +196,9 @@ impl Engagement {
     }
     pub fn save_aps(&self) -> Result<()> {
         self.aps.save(&Self::aps_path(&self.dir))
+    }
+    pub fn save_pivots(&self) -> Result<()> {
+        self.pivots.save(&Self::pivots_path(&self.dir))
     }
     pub fn save_profiles(&self) -> Result<()> {
         self.profiles.save(&Self::creds_path(&self.dir))

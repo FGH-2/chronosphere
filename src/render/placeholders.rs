@@ -38,6 +38,21 @@ pub const BUILTIN_PLACEHOLDERS: &[&str] = &[
     "wpa_psk",
     "capture",
     "vendor",
+    "pivot_host",
+    "pivot_user",
+    "pivot_name",
+    "target_name",
+    "pivot_ssh_port",
+    "pivot_ssh_password",
+    "pivot_ssh_key",
+    "pivot_ssh_key_pub",
+    "engagement_dir",
+    "tun_iface",
+    "ligolo_route",
+    "ligolo_server_addr",
+    "agent_path",
+    "proxy_prefix",
+    "execution_mode",
 ];
 
 pub fn is_builtin_placeholder(name: &str) -> bool {

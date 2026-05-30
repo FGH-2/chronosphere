@@ -4,7 +4,8 @@
 
 use crate::config;
 use crate::engagement::{
-    AccessPoint, CredKind, CredentialProfile, Engagement, JobRecord, JobStatus, Target,
+    AccessPoint, CredKind, CredentialProfile, Engagement, ExecutionMode, JobRecord, JobStatus,
+    Pivot, Target,
 };
 use crate::library::CommandLibrary;
 use crate::render::{self, RenderContext};
@@ -100,6 +101,10 @@ pub enum Command {
     /// WiFi access point CRUD.
     #[command(subcommand)]
     Aps(ApCmd),
+
+    /// Foothold pivot CRUD (ligolo tunnel + SSH remote exec).
+    #[command(subcommand)]
+    Pivots(PivotCmd),
 
     /// Credential CRUD.
     #[command(subcommand)]
@@ -228,6 +233,51 @@ pub enum ApCmd {
     },
     Remove {
         name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PivotCmd {
+    List,
+    Add {
+        name: String,
+        #[arg(long)]
+        ssh_host: Option<String>,
+        #[arg(long)]
+        ssh_user: Option<String>,
+        #[arg(long)]
+        ssh_port: Option<u16>,
+        #[arg(long)]
+        ssh_identity: Option<String>,
+        #[arg(long)]
+        ssh_password: Option<String>,
+        #[arg(long)]
+        ligolo_iface: Option<String>,
+        #[arg(long)]
+        ligolo_server: Option<String>,
+        #[arg(long)]
+        ligolo_routes: Option<String>,
+        #[arg(long)]
+        agent_path: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    Use {
+        name: String,
+        /// Set active tunnel pivot only.
+        #[arg(long, conflicts_with = "remote")]
+        tunnel: bool,
+        /// Set active remote pivot only.
+        #[arg(long, conflicts_with = "tunnel")]
+        remote: bool,
+    },
+    Remove {
+        name: String,
+    },
+    /// Toggle local vs remote script execution.
+    Exec {
+        /// `local` or `remote`.
+        mode: String,
     },
 }
 
@@ -647,6 +697,123 @@ alias chronosphere='{bin}'
             }
             Ok(true)
         }
+        Command::Pivots(c) => {
+            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            match c {
+                PivotCmd::List => {
+                    let tun = e.pivots.active_tunnel.clone();
+                    let rem = e.pivots.active_remote.clone();
+                    println!(
+                        "execution_mode={}  active_tunnel={}  active_remote={}",
+                        e.pivots.execution_mode.as_str(),
+                        tun.as_deref().unwrap_or("-"),
+                        rem.as_deref().unwrap_or("-"),
+                    );
+                    for p in &e.pivots.pivots {
+                        let t = if tun.as_deref() == Some(p.name.as_str()) {
+                            "T"
+                        } else {
+                            " "
+                        };
+                        let r = if rem.as_deref() == Some(p.name.as_str()) {
+                            "R"
+                        } else {
+                            " "
+                        };
+                        println!(
+                            "{}{} {:>10}  user={}  ssh={}  host={}  tun={}  routes={}",
+                            t,
+                            r,
+                            p.name,
+                            p.ssh_user.as_deref().unwrap_or("-"),
+                            if p.has_ssh() { "yes" } else { "no" },
+                            p.ssh_host.as_deref().unwrap_or("-"),
+                            p.ligolo_interface.as_deref().unwrap_or("-"),
+                            p.ligolo_routes.join(","),
+                        );
+                    }
+                }
+                PivotCmd::Add {
+                    name,
+                    ssh_host,
+                    ssh_user,
+                    ssh_port,
+                    ssh_identity,
+                    ssh_password,
+                    ligolo_iface,
+                    ligolo_server,
+                    ligolo_routes,
+                    agent_path,
+                    notes,
+                } => {
+                    let routes: Vec<String> = ligolo_routes
+                        .as_deref()
+                        .map(|s| {
+                            s.split(',')
+                                .map(|x| x.trim().to_string())
+                                .filter(|x| !x.is_empty())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let activate = name.clone();
+                    e.pivots.upsert(Pivot {
+                        name,
+                        ssh_host,
+                        ssh_user,
+                        ssh_port,
+                        ssh_identity,
+                        ssh_password,
+                        ligolo_interface: ligolo_iface,
+                        ligolo_server_addr: ligolo_server,
+                        ligolo_routes: routes,
+                        agent_path,
+                        notes,
+                    });
+                    if e.pivots.active_tunnel.is_none() {
+                        e.pivots.active_tunnel = Some(activate.clone());
+                    }
+                    if e.pivots.active_remote.is_none() {
+                        e.pivots.active_remote = Some(activate);
+                    }
+                    e.save_pivots()?;
+                }
+                PivotCmd::Use {
+                    name,
+                    tunnel,
+                    remote,
+                } => {
+                    if !e.pivots.pivots.iter().any(|p| p.name == name) {
+                        bail!("no pivot named {}", name);
+                    }
+                    if tunnel {
+                        e.pivots.set_active_tunnel(&name);
+                    } else if remote {
+                        e.pivots.set_active_remote(&name);
+                    } else {
+                        e.pivots.set_active_tunnel(&name);
+                        e.pivots.set_active_remote(&name);
+                    }
+                    e.save_pivots()?;
+                }
+                PivotCmd::Remove { name } => {
+                    e.pivots.remove(&name);
+                    e.save_pivots()?;
+                }
+                PivotCmd::Exec { mode } => {
+                    let m = ExecutionMode::parse(&mode)
+                        .ok_or_else(|| anyhow!("mode must be local or remote"))?;
+                    if m == ExecutionMode::Remote
+                        && e.pivots.active_remote().is_none_or(|p| !p.has_ssh())
+                    {
+                        bail!("set a remote pivot with ssh_user/ssh_host first");
+                    }
+                    e.pivots.execution_mode = m;
+                    e.save_pivots()?;
+                    println!("execution mode: {}", m.as_str());
+                }
+            }
+            Ok(true)
+        }
         Command::Creds(c) => {
             let mut e = open_engagement(&root, cli.engagement.as_deref())?;
             match c {
@@ -771,6 +938,10 @@ fn build_context(
     if let Some(p) = active_p {
         ctx.profile = Some(p.clone());
     }
+    ctx.pivot_tunnel = e.pivots.active_tunnel().cloned();
+    ctx.pivot_remote = e.pivots.active_remote().cloned();
+    ctx.execution_mode = e.pivots.execution_mode;
+    ctx.engagement_dir = Some(e.dir.clone());
     ctx.globals = e.variables.values.clone();
     for kv in extra_vars {
         if let Some((k, v)) = kv.split_once('=') {
@@ -854,6 +1025,22 @@ async fn run_with_history(
     let mut e = open_engagement(root, engagement)?;
     let target = e.targets.active().map(|t| t.name.clone());
     let ap = e.aps.active().map(|a| a.name.clone());
+    let pivot = e
+        .pivots
+        .active_remote()
+        .or_else(|| e.pivots.active_tunnel())
+        .map(|p| p.name.clone());
+    let execution = if e.pivots.execution_mode == ExecutionMode::Remote {
+        Some(format!(
+            "remote@{}",
+            e.pivots
+                .active_remote()
+                .map(|p| p.name.as_str())
+                .unwrap_or("?")
+        ))
+    } else {
+        Some("local".into())
+    };
     let profile = e.profiles.active().map(|p| p.name.clone());
     let started_at = Utc::now();
     let job_id = format!("{}", uuid::Uuid::new_v4());
@@ -875,6 +1062,8 @@ async fn run_with_history(
         target,
         profile,
         ap,
+        pivot,
+        execution,
         started_at,
         finished_at: Some(Utc::now()),
         status: if status.success() {

@@ -90,7 +90,8 @@ fn expand_placeholders(template: &str, ctx: &RenderContext) -> PlaceholderPass {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engagement::{AccessPoint, CredKind, CredentialProfile, Target};
+    use crate::engagement::{AccessPoint, CredKind, CredentialProfile, ExecutionMode, Pivot, Target};
+    use std::path::PathBuf;
 
     fn ctx() -> RenderContext {
         let mut c = RenderContext::default();
@@ -170,6 +171,82 @@ mod tests {
         let out = render("nxc smb {target} {made_up}", &ctx()).unwrap();
         assert!(out.resolved.contains("{made_up}"));
         assert_eq!(out.unresolved, vec!["made_up".to_string()]);
+    }
+
+    #[test]
+    fn pivot_placeholders_from_active_tunnel() {
+        let mut c = RenderContext::default();
+        c.pivot_tunnel = Some(Pivot {
+            name: "web01".into(),
+            ssh_host: Some("10.10.11.5".into()),
+            ssh_user: Some("www-data".into()),
+            ssh_port: None,
+            ssh_identity: None,
+            ssh_password: None,
+            ligolo_interface: Some("ligolo".into()),
+            ligolo_server_addr: Some("0.0.0.0:11601".into()),
+            ligolo_routes: vec!["10.10.11.0/24".into()],
+            agent_path: Some("/tmp/agent".into()),
+            notes: None,
+        });
+        c.execution_mode = ExecutionMode::Local;
+        let out = render(
+            "route {ligolo_route} dev {tun_iface} user {pivot_user}@{pivot_host} agent {agent_path}",
+            &c,
+        )
+        .unwrap();
+        assert!(out.resolved.contains("10.10.11.0/24"));
+        assert!(out.resolved.contains("ligolo"));
+        assert!(out.resolved.contains("www-data"));
+        assert!(out.resolved.contains("10.10.11.5"));
+        assert!(out.resolved.contains("/tmp/agent"));
+    }
+
+    #[test]
+    fn execution_mode_placeholder() {
+        let mut c = RenderContext::default();
+        c.execution_mode = ExecutionMode::Remote;
+        let out = render("mode={execution_mode}", &c).unwrap();
+        assert_eq!(out.resolved, "mode=remote");
+    }
+
+    #[test]
+    fn pivot_ssh_key_defaults_to_engagement_ssh_id_target() {
+        let mut c = RenderContext::default();
+        c.target = Some(Target {
+            name: "dc01".into(),
+            ip: Some("10.10.11.10".into()),
+            hostname: None,
+            dc_name: None,
+            lhost: None,
+            lport: None,
+            notes: None,
+        });
+        c.engagement_dir = Some(PathBuf::from("/tmp/engagement-test"));
+        let out = render("key={pivot_ssh_key} pub={pivot_ssh_key_pub}", &c).unwrap();
+        assert!(out.resolved.contains("/tmp/engagement-test/.ssh/id_dc01"));
+        assert!(out.resolved.contains(".pub"));
+    }
+
+    #[test]
+    fn pivot_ssh_key_uses_identity_override() {
+        let mut c = RenderContext::default();
+        c.pivot_remote = Some(Pivot {
+            name: "web01".into(),
+            ssh_host: Some("10.0.0.1".into()),
+            ssh_user: Some("root".into()),
+            ssh_port: None,
+            ssh_identity: Some("/custom/key".into()),
+            ssh_password: None,
+            ligolo_interface: None,
+            ligolo_server_addr: None,
+            ligolo_routes: vec![],
+            agent_path: None,
+            notes: None,
+        });
+        c.engagement_dir = Some(PathBuf::from("/tmp/engagement-test"));
+        let out = render("{pivot_ssh_key}", &c).unwrap();
+        assert_eq!(out.resolved, "/custom/key");
     }
 
     #[test]

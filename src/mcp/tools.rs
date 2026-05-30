@@ -77,6 +77,10 @@ impl State {
             if let Some(p) = p {
                 ctx.profile = Some(p.clone());
             }
+            ctx.pivot_tunnel = e.pivots.active_tunnel().cloned();
+            ctx.pivot_remote = e.pivots.active_remote().cloned();
+            ctx.execution_mode = e.pivots.execution_mode;
+            ctx.engagement_dir = Some(e.dir.clone());
             ctx.globals = e.variables.values.clone();
         }
         for (k, v) in extra_vars {
@@ -411,6 +415,22 @@ async fn tool_engagement_info(state: Arc<Mutex<State>>) -> Result<Value> {
                 "wps_pin": a.wps_pin,
                 "capture": a.capture,
             })),
+            "active_tunnel_pivot": e.pivots.active_tunnel().map(|p| json!({
+                "name": p.name,
+                "ssh_host": p.ssh_host,
+                "ligolo_interface": p.ligolo_interface,
+                "ligolo_routes": p.ligolo_routes,
+            })),
+            "active_remote_pivot": e.pivots.active_remote().map(|p| json!({
+                "name": p.name,
+                "ssh_host": p.ssh_host,
+                "ssh_user": p.ssh_user,
+                "ssh_identity": p.ssh_identity,
+                "ssh_password": p.ssh_password.as_ref().map(|_| "<set>"),
+                "has_ssh": p.has_ssh(),
+            })),
+            "execution_mode": e.pivots.execution_mode.as_str(),
+            "tunnel_active": e.pivots.is_tunnel_active(),
             "active_creds": e.profiles.active().map(|p| json!({
                 "name": p.name,
                 "kind": p.kind.as_str(),
@@ -419,6 +439,7 @@ async fn tool_engagement_info(state: Arc<Mutex<State>>) -> Result<Value> {
             })),
             "target_count": e.targets.targets.len(),
             "ap_count": e.aps.aps.len(),
+            "pivot_count": e.pivots.pivots.len(),
             "creds_count": e.profiles.profiles.len(),
             "variables_set": e.variables.values.values().filter(|v| !v.is_empty()).count(),
             "variables_total": e.variables.values.len(),
@@ -635,6 +656,22 @@ async fn tool_run_command(args: Value, state: Arc<Mutex<State>>) -> Result<Value
     {
         let mut s = state.lock().await;
         let eng = s.engagement.as_mut().ok_or_else(|| anyhow!("no engagement"))?;
+        let pivot_name = eng
+            .pivots
+            .active_remote()
+            .or_else(|| eng.pivots.active_tunnel())
+            .map(|p| p.name.clone());
+        let execution_label = if eng.pivots.execution_mode == crate::engagement::ExecutionMode::Remote {
+            format!(
+                "remote@{}",
+                eng.pivots
+                    .active_remote()
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("?")
+            )
+        } else {
+            "local".into()
+        };
         let rec = JobRecord {
             id: job_id.clone(),
             command_id: Some(command_id.clone()),
@@ -649,6 +686,8 @@ async fn tool_run_command(args: Value, state: Arc<Mutex<State>>) -> Result<Value
             target: target_name.clone(),
             profile: profile_name.clone(),
             ap: ap_name.clone(),
+            pivot: pivot_name,
+            execution: Some(execution_label),
         };
         eng.history.append(&rec)?;
     }

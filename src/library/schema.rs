@@ -27,6 +27,13 @@ pub struct CommandEntry {
     pub description: Option<String>,
     #[serde(default)]
     pub variants: Vec<CommandVariant>,
+    /// Where the command may run: `local` (default), `remote`, or `any`.
+    #[serde(default = "default_execution_local")]
+    pub execution: String,
+}
+
+fn default_execution_local() -> String {
+    "local".into()
 }
 
 impl CommandEntry {
@@ -45,6 +52,14 @@ impl CommandEntry {
             Some(w) => eval(w),
             None => true,
         }
+    }
+
+    pub fn allows_remote(&self) -> bool {
+        matches!(self.execution.as_str(), "remote" | "any")
+    }
+
+    pub fn allows_local(&self) -> bool {
+        matches!(self.execution.as_str(), "local" | "any" | "")
     }
 }
 

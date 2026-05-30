@@ -1,7 +1,8 @@
 use crate::clipboard;
 use crate::config;
 use crate::engagement::{
-    AccessPoint, CredKind, CredentialProfile, Engagement, JobRecord, JobStatus, Target,
+    AccessPoint, CredKind, CredentialProfile, Engagement, ExecutionMode, JobRecord, JobStatus,
+    Pivot, Target,
 };
 use crate::exec::{Executor, FocusResult, SpawnRequest};
 use crate::input::{apply_to_string, apply_to_textarea, text_edit_action, TextEditAction};
@@ -198,6 +199,76 @@ impl ApEditField {
 }
 
 #[derive(Default)]
+pub struct PivotModal {
+    pub state: PivotModalState,
+}
+
+pub enum PivotModalState {
+    List {
+        cursor: usize,
+    },
+    Edit {
+        fields: Vec<(PivotEditField, String)>,
+        focused: usize,
+        original_name: Option<String>,
+    },
+}
+
+impl Default for PivotModalState {
+    fn default() -> Self {
+        PivotModalState::List { cursor: 0 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PivotEditField {
+    Name,
+    SshHost,
+    SshUser,
+    SshPort,
+    SshIdentity,
+    SshPassword,
+    LigoloIface,
+    LigoloServer,
+    LigoloRoutes,
+    AgentPath,
+    Notes,
+}
+
+impl PivotEditField {
+    pub fn label(self) -> &'static str {
+        match self {
+            PivotEditField::Name => "name",
+            PivotEditField::SshHost => "ssh_host",
+            PivotEditField::SshUser => "ssh_user",
+            PivotEditField::SshPort => "ssh_port",
+            PivotEditField::SshIdentity => "ssh_identity",
+            PivotEditField::SshPassword => "ssh_password",
+            PivotEditField::LigoloIface => "ligolo_iface",
+            PivotEditField::LigoloServer => "ligolo_server",
+            PivotEditField::LigoloRoutes => "ligolo_routes",
+            PivotEditField::AgentPath => "agent_path",
+            PivotEditField::Notes => "notes",
+        }
+    }
+    pub fn all() -> &'static [PivotEditField] {
+        &[
+            PivotEditField::Name,
+            PivotEditField::SshHost,
+            PivotEditField::SshUser,
+            PivotEditField::SshPort,
+            PivotEditField::SshIdentity,
+            PivotEditField::SshPassword,
+            PivotEditField::LigoloIface,
+            PivotEditField::LigoloServer,
+            PivotEditField::LigoloRoutes,
+            PivotEditField::AgentPath,
+            PivotEditField::Notes,
+        ]
+    }
+}
+
+#[derive(Default)]
 pub struct CredsModal {
     pub state: CredsModalState,
 }
@@ -354,6 +425,7 @@ pub enum Modal {
     Engagement(EngagementModal),
     Target(TargetModal),
     Ap(ApModal),
+    Pivot(PivotModal),
     Creds(CredsModal),
     Variables(VariablesModal),
     Tools(ToolsModal),
@@ -780,6 +852,8 @@ impl App {
             "engagement" | "eng" => self.open_engagement_modal(rest.as_slice()),
             "target" | "t" => self.open_target_modal(rest.as_slice()),
             "ap" | "aps" | "wifi" => self.open_ap_modal(rest.as_slice()),
+            "pivot" | "pivots" => self.open_pivot_modal(rest.as_slice()),
+            "exec" | "execution" => self.set_execution_mode(rest.first().copied()),
             "creds" | "c" => self.open_creds_modal(rest.as_slice()),
             "variable" | "variables" | "var" | "vars" | "v" => {
                 self.open_variables_modal(rest.as_slice())
@@ -982,7 +1056,7 @@ impl App {
         };
         self.modal = Modal::None;
         self.mode = Mode::Normal;
-        self.spawn_resolved(resolved, Some(category_id), title, interactive);
+        self.spawn_resolved(resolved, Some(category_id), title, interactive, None);
     }
 
     fn commit_edit_modal_save_prompt(&mut self) {
@@ -1068,6 +1142,7 @@ impl App {
             interactive,
             description,
             variants: Vec::<CommandVariant>::new(),
+            execution: "local".to_string(),
         });
         let body = toml::to_string_pretty(&file).context("serialize override toml")?;
         fs::write(&path, body)?;
@@ -1085,6 +1160,7 @@ impl App {
             Modal::Engagement(_) => self.handle_engagement_modal(ke),
             Modal::Target(_) => self.handle_target_modal(ke),
             Modal::Ap(_) => self.handle_ap_modal(ke),
+            Modal::Pivot(_) => self.handle_pivot_modal(ke),
             Modal::Creds(_) => self.handle_creds_modal(ke),
             Modal::Variables(_) => self.handle_variables_modal(ke),
             _ => {}
@@ -1392,6 +1468,227 @@ impl App {
                     }
                     self.modal = Modal::Ap(ApModal {
                         state: ApModalState::List { cursor: 0 },
+                    });
+                }
+                _ => {
+                    if let Some((_, v)) = fields.get_mut(*focused) {
+                        apply_to_string(v, text_edit_action(&ke));
+                    }
+                }
+            },
+        }
+    }
+
+    fn open_pivot_modal(&mut self, rest: &[&str]) {
+        if self.engagement.is_none() {
+            self.flash_error("create or switch to an engagement first (:engagement new <name>)".into());
+            return;
+        }
+        if let Some(spec) = rest.first() {
+            if let Some(eng) = self.engagement.as_mut() {
+                match *spec {
+                    "tunnel" if rest.len() >= 2 => {
+                        let name = rest[1];
+                        if eng.pivots.set_active_tunnel(name) {
+                            let _ = eng.save_pivots();
+                            self.flash_ok(format!("tunnel pivot '{}' active", name));
+                        } else {
+                            self.flash_error(format!("no pivot named '{}'", name));
+                        }
+                    }
+                    "remote" if rest.len() >= 2 => {
+                        let name = rest[1];
+                        if eng.pivots.set_active_remote(name) {
+                            let _ = eng.save_pivots();
+                            self.flash_ok(format!("remote pivot '{}' active", name));
+                        } else {
+                            self.flash_error(format!("no pivot named '{}'", name));
+                        }
+                    }
+                    "tunnel-off" => {
+                        eng.pivots.clear_active_tunnel();
+                        let _ = eng.save_pivots();
+                        self.flash_ok("tunnel pivot cleared".into());
+                    }
+                    name => {
+                        if eng.pivots.set_active_tunnel(name) {
+                            eng.pivots.set_active_remote(name);
+                            let _ = eng.save_pivots();
+                            self.flash_ok(format!("pivot '{}' active (tunnel+remote)", name));
+                        } else {
+                            self.flash_error(format!("no pivot named '{}'", name));
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        self.modal = Modal::Pivot(PivotModal {
+            state: PivotModalState::List { cursor: 0 },
+        });
+    }
+
+    fn set_execution_mode(&mut self, mode: Option<&str>) {
+        if self.engagement.is_none() {
+            self.flash_error("create or switch to an engagement first".into());
+            return;
+        }
+        let Some(spec) = mode else {
+            self.flash_error("use :exec local or :exec remote".into());
+            return;
+        };
+        let m = match ExecutionMode::parse(spec) {
+            Some(m) => m,
+            None => {
+                self.flash_error("use :exec local or :exec remote".into());
+                return;
+            }
+        };
+        if let Some(eng) = self.engagement.as_mut() {
+            if m == ExecutionMode::Remote
+                && eng.pivots.active_remote().is_none_or(|p| !p.has_ssh())
+            {
+                self.flash_error("set a remote pivot with ssh_user/ssh_host first (:pivot)".into());
+                return;
+            }
+            eng.pivots.execution_mode = m;
+            let _ = eng.save_pivots();
+            self.flash_ok(format!("execution mode: {}", m.as_str()));
+        }
+    }
+
+    fn handle_pivot_modal(&mut self, ke: KeyEvent) {
+        let m = match &mut self.modal {
+            Modal::Pivot(m) => m,
+            _ => return,
+        };
+        match &mut m.state {
+            PivotModalState::List { cursor } => {
+                let eng = self.engagement.as_mut();
+                let len = eng.as_ref().map(|e| e.pivots.pivots.len()).unwrap_or(0);
+                match ke.code {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if len > 0 && *cursor + 1 < len {
+                            *cursor += 1;
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if *cursor > 0 {
+                            *cursor -= 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if let Some(eng) = eng {
+                            if let Some(name) = eng.pivots.pivots.get(*cursor).map(|p| p.name.clone()) {
+                                eng.pivots.set_active_tunnel(&name);
+                                eng.pivots.set_active_remote(&name);
+                                let _ = eng.save_pivots();
+                            }
+                        }
+                    }
+                    KeyCode::Char('a') => {
+                        let fields = PivotEditField::all()
+                            .iter()
+                            .map(|f| (*f, String::new()))
+                            .collect();
+                        m.state = PivotModalState::Edit {
+                            fields,
+                            focused: 0,
+                            original_name: None,
+                        };
+                    }
+                    KeyCode::Char('e') => {
+                        if let Some(eng) = eng {
+                            if let Some(p) = eng.pivots.pivots.get(*cursor) {
+                                let fields = pivot_to_fields(p);
+                                m.state = PivotModalState::Edit {
+                                    fields,
+                                    focused: 0,
+                                    original_name: Some(p.name.clone()),
+                                };
+                            }
+                        }
+                    }
+                    KeyCode::Char('d') => {
+                        if let Some(eng) = eng {
+                            if let Some(p) = eng.pivots.pivots.get(*cursor).cloned() {
+                                eng.pivots.remove(&p.name);
+                                let _ = eng.save_pivots();
+                                if *cursor > 0 {
+                                    *cursor -= 1;
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Char('t') => {
+                        if let Some(eng) = eng {
+                            if let Some(name) = eng.pivots.pivots.get(*cursor).map(|p| p.name.clone()) {
+                                eng.pivots.set_active_tunnel(&name);
+                                let _ = eng.save_pivots();
+                                self.flash_ok(format!("tunnel: {}", name));
+                            }
+                        }
+                    }
+                    KeyCode::Char('r') => {
+                        if let Some(eng) = eng {
+                            if let Some(name) = eng.pivots.pivots.get(*cursor).map(|p| p.name.clone()) {
+                                eng.pivots.set_active_remote(&name);
+                                let _ = eng.save_pivots();
+                                self.flash_ok(format!("remote: {}", name));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            PivotModalState::Edit {
+                fields,
+                focused,
+                original_name,
+            } => match ke.code {
+                KeyCode::Tab | KeyCode::Down => {
+                    *focused = (*focused + 1) % fields.len();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    *focused = if *focused == 0 {
+                        fields.len() - 1
+                    } else {
+                        *focused - 1
+                    };
+                }
+                KeyCode::Enter => {
+                    let new_pivot = match fields_to_pivot(fields) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            self.flash_error(format!("invalid pivot: {}", err));
+                            return;
+                        }
+                    };
+                    let original = original_name.clone();
+                    if let Some(eng) = self.engagement.as_mut() {
+                        if let Some(orig) = original {
+                            if orig != new_pivot.name {
+                                eng.pivots.remove(&orig);
+                                if eng.pivots.active_tunnel.as_deref() == Some(&orig) {
+                                    eng.pivots.active_tunnel = Some(new_pivot.name.clone());
+                                }
+                                if eng.pivots.active_remote.as_deref() == Some(&orig) {
+                                    eng.pivots.active_remote = Some(new_pivot.name.clone());
+                                }
+                            }
+                        }
+                        let n = new_pivot.name.clone();
+                        eng.pivots.upsert(new_pivot);
+                        if eng.pivots.active_tunnel.is_none() {
+                            eng.pivots.active_tunnel = Some(n.clone());
+                        }
+                        if eng.pivots.active_remote.is_none() {
+                            eng.pivots.active_remote = Some(n);
+                        }
+                        let _ = eng.save_pivots();
+                    }
+                    self.modal = Modal::Pivot(PivotModal {
+                        state: PivotModalState::List { cursor: 0 },
                     });
                 }
                 _ => {
@@ -1890,6 +2187,7 @@ impl App {
                 Some(cat_id.clone()),
                 cmd.title.clone(),
                 cmd.interactive,
+                Some(&cmd),
             );
         }
     }
@@ -1906,6 +2204,13 @@ impl App {
                 .iter()
                 .filter(|c| {
                     c.is_applicable(&|w: &str| crate::render::condition::evaluate(w, &ctx))
+                })
+                .filter(|c| {
+                    if ctx.execution_mode == ExecutionMode::Remote {
+                        c.allows_remote()
+                    } else {
+                        c.allows_local()
+                    }
                 })
                 .map(|c| (cat.id.clone(), c.clone()))
                 .collect()
@@ -1926,7 +2231,13 @@ impl App {
                 .applicable_template(&|w: &str| crate::render::condition::evaluate(w, &ctx))
                 .to_string();
             match render::render(&tmpl, &ctx) {
-                Ok(r) => self.spawn_resolved(r.resolved, Some(cat_id), cmd.title, cmd.interactive),
+                Ok(r) => self.spawn_resolved(
+                    r.resolved,
+                    Some(cat_id),
+                    cmd.title.clone(),
+                    cmd.interactive,
+                    Some(&cmd),
+                ),
                 Err(err) => self.flash_error(format!("render: {}", err)),
             }
         }
@@ -1939,7 +2250,18 @@ impl App {
         category_id: Option<String>,
         title: String,
         interactive: bool,
+        cmd: Option<&CommandEntry>,
     ) {
+        if let Some(c) = cmd {
+            let ctx = self.render_context();
+            if ctx.execution_mode == ExecutionMode::Remote && !c.allows_remote() {
+                self.flash_error(format!(
+                    "'{}' is local-only — use :exec local or pick a remote-safe command",
+                    c.title
+                ));
+                return;
+            }
+        }
         let exe = match self.executor.as_ref() {
             Some(e) => e,
             None => {
@@ -1947,6 +2269,26 @@ impl App {
                 return;
             }
         };
+        let (execution_mode, remote_pivot, pivot_name, execution_label) = self
+            .engagement
+            .as_ref()
+            .map(|e| {
+                let label = if e.pivots.execution_mode == ExecutionMode::Remote {
+                    format!("remote@{}", e.pivots.active_remote().map(|p| p.name.as_str()).unwrap_or("?"))
+                } else {
+                    "local".to_string()
+                };
+                (
+                    e.pivots.execution_mode,
+                    e.pivots.active_remote().cloned(),
+                    e.pivots
+                        .active_remote()
+                        .or_else(|| e.pivots.active_tunnel())
+                        .map(|p| p.name.clone()),
+                    label,
+                )
+            })
+            .unwrap_or((ExecutionMode::Local, None, None, "local".into()));
         let req = SpawnRequest {
             command_id: category_id.map(|cid| format!("{}.{}", cid, slug(&title))),
             command_title: title,
@@ -1964,6 +2306,10 @@ impl App {
                 .engagement
                 .as_ref()
                 .and_then(|e| e.active_ap().map(|a| a.name.clone())),
+            pivot: pivot_name,
+            execution: Some(execution_label),
+            execution_mode,
+            remote_pivot,
         };
         match exe.spawn(req) {
             Ok(rec) => {
@@ -2393,6 +2739,13 @@ impl App {
         cat.commands
             .iter()
             .filter(|c| c.is_applicable(&|w: &str| crate::render::condition::evaluate(w, &ctx)))
+            .filter(|c| {
+                if ctx.execution_mode == ExecutionMode::Remote {
+                    c.allows_remote()
+                } else {
+                    c.allows_local()
+                }
+            })
             .cloned()
             .collect()
     }
@@ -2420,6 +2773,10 @@ impl App {
         if let Some(eng) = &self.engagement {
             ctx.target = eng.active_target().cloned();
             ctx.ap = eng.active_ap().cloned();
+            ctx.pivot_tunnel = eng.pivots.active_tunnel().cloned();
+            ctx.pivot_remote = eng.pivots.active_remote().cloned();
+            ctx.execution_mode = eng.pivots.execution_mode;
+            ctx.engagement_dir = Some(eng.dir.clone());
             ctx.profile = eng.active_profile().cloned();
             ctx.globals = eng.variables.values.clone();
         }
@@ -2616,6 +2973,83 @@ fn fields_to_target(fields: &[(TargetEditField, String)]) -> Result<Target> {
         anyhow::bail!("name required");
     }
     Ok(t)
+}
+
+fn pivot_to_fields(p: &Pivot) -> Vec<(PivotEditField, String)> {
+    PivotEditField::all()
+        .iter()
+        .map(|f| {
+            let v = match f {
+                PivotEditField::Name => p.name.clone(),
+                PivotEditField::SshHost => p.ssh_host.clone().unwrap_or_default(),
+                PivotEditField::SshUser => p.ssh_user.clone().unwrap_or_default(),
+                PivotEditField::SshPort => p
+                    .ssh_port
+                    .map(|n| n.to_string())
+                    .unwrap_or_default(),
+                PivotEditField::SshIdentity => p.ssh_identity.clone().unwrap_or_default(),
+                PivotEditField::SshPassword => p.ssh_password.clone().unwrap_or_default(),
+                PivotEditField::LigoloIface => p.ligolo_interface.clone().unwrap_or_default(),
+                PivotEditField::LigoloServer => p.ligolo_server_addr.clone().unwrap_or_default(),
+                PivotEditField::LigoloRoutes => p.ligolo_routes.join(","),
+                PivotEditField::AgentPath => p.agent_path.clone().unwrap_or_default(),
+                PivotEditField::Notes => p.notes.clone().unwrap_or_default(),
+            };
+            (*f, v)
+        })
+        .collect()
+}
+
+fn fields_to_pivot(fields: &[(PivotEditField, String)]) -> Result<Pivot> {
+    let mut p = Pivot::default();
+    for (f, v) in fields {
+        let trimmed = v.trim();
+        match f {
+            PivotEditField::Name => p.name = trimmed.to_string(),
+            PivotEditField::SshHost => {
+                p.ssh_host = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            PivotEditField::SshUser => {
+                p.ssh_user = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            PivotEditField::SshPort => {
+                p.ssh_port = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.parse().context("invalid ssh_port")?)
+                };
+            }
+            PivotEditField::SshIdentity => {
+                p.ssh_identity = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            PivotEditField::SshPassword => {
+                p.ssh_password = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            PivotEditField::LigoloIface => {
+                p.ligolo_interface = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            PivotEditField::LigoloServer => {
+                p.ligolo_server_addr = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            PivotEditField::LigoloRoutes => {
+                p.ligolo_routes = trimmed
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+            PivotEditField::AgentPath => {
+                p.agent_path = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            PivotEditField::Notes => {
+                p.notes = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+        }
+    }
+    if p.name.is_empty() {
+        anyhow::bail!("name required");
+    }
+    Ok(p)
 }
 
 fn ap_to_fields(a: &AccessPoint) -> Vec<(ApEditField, String)> {

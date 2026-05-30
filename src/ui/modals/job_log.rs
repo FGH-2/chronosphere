@@ -311,6 +311,8 @@ mod tests {
             target: None,
             profile: None,
             ap: None,
+            pivot: None,
+            execution: None,
         };
         (path, job)
     }

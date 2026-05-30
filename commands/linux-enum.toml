@@ -8,72 +8,84 @@ id = "lin.basics.whoami"
 title = "id / whoami / hostname / uname"
 template = "id; whoami; hostname; uname -a; cat /etc/os-release"
 tags = ["basics"]
+execution = "remote"
 
 [[command]]
 id = "lin.basics.suid"
 title = "find SUID/SGID binaries"
 template = "find / -perm -4000 -type f 2>/dev/null"
 tags = ["suid", "privesc"]
+execution = "remote"
 
 [[command]]
 id = "lin.basics.caps"
 title = "find files with capabilities"
 template = "getcap -r / 2>/dev/null"
 tags = ["caps", "privesc"]
+execution = "remote"
 
 [[command]]
 id = "lin.basics.world_writable"
 title = "world-writable files in /etc and /opt"
 template = "find /etc /opt -type f -perm -o+w 2>/dev/null"
 tags = ["misconfig"]
+execution = "remote"
 
 [[command]]
 id = "lin.cron"
 title = "cron jobs (system + user)"
 template = "ls -la /etc/cron* /var/spool/cron 2>/dev/null; cat /etc/crontab 2>/dev/null"
 tags = ["cron"]
+execution = "remote"
 
 [[command]]
 id = "lin.process_short"
 title = "running processes"
 template = "ps auxf"
 tags = ["processes"]
+execution = "remote"
 
 [[command]]
 id = "lin.network"
 title = "network bindings"
 template = "ss -tulpan 2>/dev/null || netstat -tulpan 2>/dev/null"
 tags = ["network"]
+execution = "remote"
 
 [[command]]
 id = "lin.sudoers"
 title = "sudo -l"
 template = "sudo -l 2>/dev/null"
 tags = ["sudo", "privesc"]
+execution = "remote"
 
 [[command]]
 id = "lin.history"
 title = "look at history files"
 template = "cat ~/.bash_history ~/.zsh_history ~/.history 2>/dev/null"
 tags = ["history"]
+execution = "remote"
 
 [[command]]
 id = "lin.creds_in_home"
 title = "search home for secrets"
 template = "grep -rni --include='*.txt' --include='*.conf' --include='*.cfg' --include='*.env' -e password -e passwd -e api -e token -e secret /home 2>/dev/null"
 tags = ["secrets"]
+execution = "remote"
 
 [[command]]
 id = "lin.docker_check"
 title = "docker socket / group?"
 template = "id | grep -q docker && echo IN_DOCKER_GROUP; ls -la /var/run/docker.sock 2>/dev/null"
 tags = ["docker", "privesc"]
+execution = "remote"
 
 [[command]]
 id = "lin.kernel"
 title = "kernel & exploit candidates"
 template = "uname -r; cat /etc/issue; cat /proc/version"
 tags = ["kernel"]
+execution = "remote"
 
 [[command]]
 id = "lin.lse_short"

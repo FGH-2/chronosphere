@@ -10,11 +10,11 @@
 //! We deliberately avoid linking an SSH library (libssh2/russh) to keep the
 //! binary small for Pwnbox use — calling out to ssh/scp is universally available.
 
+use crate::exec::ssh::{shell_escape, SshDeploySession};
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Args, Debug, Clone)]
 pub struct DeployArgs {
@@ -83,21 +83,22 @@ pub fn run(args: DeployArgs) -> Result<()> {
     }
 
     // 1) scp binary to /tmp on remote
-    run_scp(&binary, &format!("{}:{}", host_spec.target, remote_tmp), &args, &auth)?;
+    let ssh = deploy_session(&args, &auth);
+    ssh.run_scp(&binary, &format!("{}:{}", host_spec.target, remote_tmp))?;
 
     // 2) install into remote_path (with sudo if asked) + chmod +x
     let install_cmd = build_install_cmd(remote_tmp, &args.remote_path, args.sudo);
-    run_ssh(&host_spec.target, &install_cmd, &args, &auth)?;
+    ssh.run_ssh(&host_spec.target, &install_cmd)?;
 
     // 3) extract embedded templates (so the remote has the command library)
     if !args.no_extract {
         let extract_cmd = format!("{} update-templates --force >/dev/null", args.remote_path);
-        run_ssh(&host_spec.target, &extract_cmd, &args, &auth)?;
+        ssh.run_ssh(&host_spec.target, &extract_cmd)?;
     }
 
     // 4) sanity check version
     let version_cmd = format!("{} --version", args.remote_path);
-    run_ssh(&host_spec.target, &version_cmd, &args, &auth)?;
+    ssh.run_ssh(&host_spec.target, &version_cmd)?;
 
     println!("[chronosphere] deploy complete. Try:");
     println!("    ssh {} {} list categories", host_spec.display, args.remote_path);
@@ -215,48 +216,18 @@ fn prompt_password(prompt: &str) -> Result<String> {
     Ok(buf.trim_end_matches(&['\n', '\r'][..]).to_string())
 }
 
-fn run_scp(local: &Path, remote: &str, args: &DeployArgs, auth: &Auth) -> Result<()> {
-    let mut cmd = match auth {
-        Auth::Password(pw) => {
-            let mut c = Command::new("sshpass");
-            c.arg("-p").arg(pw).arg("scp");
-            c
-        }
-        _ => Command::new("scp"),
-    };
-    cmd.arg("-P").arg(args.port.to_string());
-    cmd.arg("-o").arg("StrictHostKeyChecking=accept-new");
-    if let Auth::Identity(id) = auth {
-        cmd.arg("-i").arg(id);
+fn deploy_session(args: &DeployArgs, auth: &Auth) -> SshDeploySession {
+    SshDeploySession {
+        port: args.port,
+        identity: match auth {
+            Auth::Identity(id) => Some(id.clone()),
+            _ => args.identity.clone(),
+        },
+        password: match auth {
+            Auth::Password(pw) => Some(pw.clone()),
+            _ => None,
+        },
     }
-    cmd.arg(local).arg(remote);
-    let status = cmd.status().with_context(|| "scp")?;
-    if !status.success() {
-        bail!("scp failed with status {:?}", status.code());
-    }
-    Ok(())
-}
-
-fn run_ssh(host: &str, remote_cmd: &str, args: &DeployArgs, auth: &Auth) -> Result<()> {
-    let mut cmd = match auth {
-        Auth::Password(pw) => {
-            let mut c = Command::new("sshpass");
-            c.arg("-p").arg(pw).arg("ssh");
-            c
-        }
-        _ => Command::new("ssh"),
-    };
-    cmd.arg("-p").arg(args.port.to_string());
-    cmd.arg("-o").arg("StrictHostKeyChecking=accept-new");
-    if let Auth::Identity(id) = auth {
-        cmd.arg("-i").arg(id);
-    }
-    cmd.arg(host).arg(remote_cmd);
-    let status = cmd.status().with_context(|| "ssh")?;
-    if !status.success() {
-        bail!("ssh '{}' failed with status {:?}", remote_cmd, status.code());
-    }
-    Ok(())
 }
 
 fn build_install_cmd(src: &str, dest: &str, sudo: bool) -> String {
@@ -270,10 +241,6 @@ fn build_install_cmd(src: &str, dest: &str, sudo: bool) -> String {
         src = shell_escape(src),
         dest = shell_escape(dest),
     )
-}
-
-fn shell_escape(s: &str) -> String {
-    shell_words::quote(s).to_string()
 }
 
 /// Helper for `chronosphere mcp-config` — emit a snippet pointing at a remote host.

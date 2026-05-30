@@ -51,6 +51,7 @@ title = "icmp sanity check"
 template = "ping -c 4 {target}"
 requires = ["ping"]
 tags = ["icmp", "sanity"]
+execution = "any"
 
 [[command]]
 id = "recon.traceroute"
@@ -58,6 +59,16 @@ title = "traceroute"
 template = "traceroute {target}"
 requires = ["traceroute"]
 tags = ["network"]
+execution = "any"
+
+[[command]]
+id = "recon.nmap.fast_tcp.tunnel"
+title = "nmap fast TCP (via active tunnel)"
+template = "nmap -sS -T4 -Pn --top-ports 1000 -sV {target}"
+requires = ["nmap"]
+tags = ["nmap", "tcp", "fast", "tunnel"]
+when = "tunnel.active"
+execution = "local"
 
 # === Chained workflows ===
 

@@ -1,7 +1,10 @@
+pub mod remote;
+pub mod ssh;
 pub mod tmux;
 
 use crate::config::TMUX_SESSION;
-use crate::engagement::{Engagement, JobRecord, JobStatus};
+use crate::engagement::{Engagement, ExecutionMode, JobRecord, JobStatus, Pivot};
+use crate::exec::remote::wrap_for_remote;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::fs;
@@ -17,6 +20,10 @@ pub struct SpawnRequest {
     pub target: Option<String>,
     pub profile: Option<String>,
     pub ap: Option<String>,
+    pub pivot: Option<String>,
+    pub execution: Option<String>,
+    pub execution_mode: ExecutionMode,
+    pub remote_pivot: Option<Pivot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +36,14 @@ pub enum TmuxAvailability {
 pub struct Executor {
     pub availability: TmuxAvailability,
     pub jobs_dir: PathBuf,
+    pub engagement_dir: PathBuf,
 }
 
 impl Executor {
     pub fn init(engagement: &Engagement) -> Self {
         let jobs_dir = Engagement::jobs_dir(&engagement.dir);
         fs::create_dir_all(&jobs_dir).ok();
+        fs::create_dir_all(Engagement::ssh_dir(&engagement.dir)).ok();
 
         let availability = if std::env::var("TMUX").is_ok() {
             TmuxAvailability::InSession
@@ -52,6 +61,7 @@ impl Executor {
         Self {
             availability,
             jobs_dir,
+            engagement_dir: engagement.dir.clone(),
         }
     }
 
@@ -65,13 +75,42 @@ impl Executor {
         let log_str = log_path.to_string_lossy().to_string();
         let status_str = status_path.to_string_lossy().to_string();
 
+        let resolved = if req.execution_mode == ExecutionMode::Remote {
+            let pivot = req
+                .remote_pivot
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("remote execution requires an active pivot with SSH"))?;
+            if !pivot.has_ssh() {
+                anyhow::bail!("pivot '{}' missing ssh_user/ssh_host", pivot.name);
+            }
+            if pivot
+                .ssh_password
+                .as_deref()
+                .is_some_and(|s| !s.is_empty())
+            {
+                crate::exec::ssh::ensure_sshpass()?;
+            }
+            wrap_for_remote(
+                &req.resolved,
+                pivot,
+                &self.engagement_dir,
+                &self.jobs_dir,
+                &id,
+                &log_str,
+                &status_str,
+                req.interactive,
+            )?
+        } else {
+            req.resolved.clone()
+        };
+
         let window_name = window_name_for(&req);
 
         let tmux_window = if self.availability != TmuxAvailability::Unavailable {
             let wrapped = if req.interactive {
-                interactive_wrapper(&req.resolved, &log_str, &status_str)
+                interactive_wrapper(&resolved, &log_str, &status_str)
             } else {
-                background_wrapper(&req.resolved, &log_str, &status_str)
+                background_wrapper(&resolved, &log_str, &status_str)
             };
             let opts = tmux::NewWindowOpts {
                 session: tmux_session_name(self.availability),
@@ -83,12 +122,12 @@ impl Executor {
                 Ok(wid) => Some(wid),
                 Err(err) => {
                     tracing::error!(?err, "tmux new-window failed, falling back to external terminal");
-                    spawn_external_terminal(&req.resolved, &log_str, &status_str)?;
+                    spawn_external_terminal(&resolved, &log_str, &status_str)?;
                     None
                 }
             }
         } else {
-            spawn_external_terminal(&req.resolved, &log_str, &status_str)?;
+            spawn_external_terminal(&resolved, &log_str, &status_str)?;
             None
         };
 
@@ -106,6 +145,8 @@ impl Executor {
             target: req.target,
             profile: req.profile,
             ap: req.ap,
+            pivot: req.pivot,
+            execution: req.execution,
         })
     }
 

@@ -1,0 +1,146 @@
+category = "pivot"
+display_name = "Pivot / Tunnel"
+icon = "󰖂"
+order = 13
+
+# Placeholders from active pivot (`:pivot`) and execution mode (`:exec local|remote`):
+#   pivot_host, pivot_user, pivot_ssh_port, pivot_ssh_password, pivot_ssh_key, pivot_ssh_key_pub
+#   pivot_name (active pivot or target name slug), target_name, engagement_dir/.ssh/id_{slug}
+#   tun_iface, ligolo_route, ligolo_server_addr, agent_path
+#   execution_mode=local|remote  proxy_prefix= (empty for ligolo TUN)
+#
+# Remote auth: set ssh_identity (private key path) and/or ssh_password on the pivot (`:pivot` edit).
+# Password auth uses sshpass for scp/ssh remote execution. Keys live under engagement/.ssh/ by default.
+# Chisel/SOCKS commands deferred to a follow-up release.
+#
+# Limitations: ligolo is operator-managed (long-running); remote mode runs bash on pivot via scp+ssh;
+# no WinRM; Kerberos/Impacket stay local; credentials may appear in remote shell history.
+
+[[command]]
+id = "pivot.ligolo.proxy"
+title = "ligolo-ng — start proxy on operator ({ligolo_server_addr})"
+template = "sudo ligolo-proxy -selfcert -laddr {ligolo_server_addr}"
+requires = ["ligolo-proxy"]
+tags = ["ligolo", "tunnel", "setup"]
+interactive = true
+execution = "local"
+
+[[command]]
+id = "pivot.ligolo.agent"
+title = "ligolo-ng — run agent on foothold ({pivot_host})"
+template = "{agent_path} -connect {ligolo_server_addr} -ignore-cert"
+requires = ["ligolo-agent"]
+tags = ["ligolo", "tunnel", "agent"]
+interactive = true
+execution = "remote"
+
+[[command]]
+id = "pivot.ligolo.session"
+title = "ligolo-ng — session start (interactive proxy TUI)"
+template = "ligolo-proxy -selfcert -laddr {ligolo_server_addr}"
+requires = ["ligolo-proxy"]
+tags = ["ligolo", "tunnel"]
+interactive = true
+execution = "local"
+
+[[command]]
+id = "pivot.ligolo.route.add"
+title = "Add route {ligolo_route} via {tun_iface}"
+template = "sudo ip route add {ligolo_route} dev {tun_iface}"
+requires = ["ip"]
+tags = ["ligolo", "tunnel", "route"]
+execution = "local"
+
+[[command]]
+id = "pivot.ligolo.route.del"
+title = "Delete route {ligolo_route} via {tun_iface}"
+template = "sudo ip route del {ligolo_route} dev {tun_iface} 2>/dev/null || true"
+requires = ["ip"]
+tags = ["ligolo", "tunnel", "route", "cleanup"]
+execution = "local"
+
+[[command]]
+id = "pivot.ligolo.status"
+title = "Show {tun_iface} and routes"
+template = "ip addr show {tun_iface} 2>/dev/null; ip route | grep -E '{tun_iface}|{ligolo_route}' || ip route"
+requires = ["ip"]
+tags = ["ligolo", "tunnel", "enum"]
+execution = "local"
+
+[[command]]
+id = "pivot.remote.id"
+title = "Remote — id / whoami on pivot"
+template = "id; whoami; hostname; uname -a"
+tags = ["remote", "enum"]
+execution = "remote"
+
+[[command]]
+id = "pivot.remote.ip"
+title = "Remote — ip addr on pivot"
+template = "ip -4 addr; ip route"
+requires = ["ip"]
+tags = ["remote", "enum"]
+execution = "remote"
+
+[[command]]
+id = "pivot.ssh.keygen"
+title = "Generate ed25519 key for target ({pivot_ssh_key})"
+template = "mkdir -p $(dirname {pivot_ssh_key}) && ssh-keygen -t ed25519 -f {pivot_ssh_key} -N '' -C 'chronosphere-{target_name}'"
+requires = ["ssh-keygen"]
+tags = ["ssh", "keygen", "setup"]
+execution = "local"
+
+[[command]]
+id = "pivot.ssh.keygen.rsa"
+title = "Generate RSA-4096 key for target ({pivot_ssh_key})"
+template = "mkdir -p $(dirname {pivot_ssh_key}) && ssh-keygen -t rsa -b 4096 -f {pivot_ssh_key} -N '' -C 'chronosphere-{target_name}'"
+requires = ["ssh-keygen"]
+tags = ["ssh", "keygen", "setup"]
+execution = "local"
+
+[[command]]
+id = "pivot.ssh.set_identity"
+title = "Show key path to set on pivot (copy into :pivot ssh_identity)"
+template = "echo 'Set pivot ssh_identity to: {pivot_ssh_key}' && ls -la {pivot_ssh_key} {pivot_ssh_key_pub} 2>/dev/null || true"
+tags = ["ssh", "keygen", "setup"]
+execution = "local"
+
+[[command]]
+id = "pivot.ssh.copy_id"
+title = "Install pubkey on pivot (ssh-copy-id, key auth)"
+template = "ssh-copy-id -i {pivot_ssh_key_pub} -p {pivot_ssh_port} {pivot_user}@{pivot_host}"
+requires = ["ssh-copy-id"]
+tags = ["ssh", "keygen", "setup"]
+when = "pivot.has_ssh"
+execution = "local"
+interactive = true
+
+[[command]]
+id = "pivot.ssh.copy_id.password"
+title = "Install pubkey on pivot (sshpass + ssh-copy-id)"
+template = "sshpass -p {pivot_ssh_password} ssh-copy-id -o StrictHostKeyChecking=accept-new -i {pivot_ssh_key_pub} -p {pivot_ssh_port} {pivot_user}@{pivot_host}"
+requires = ["sshpass", "ssh-copy-id"]
+tags = ["ssh", "keygen", "setup"]
+when = "pivot.has_ssh && pivot.has_password"
+execution = "local"
+interactive = true
+
+[[command]]
+id = "pivot.ssh.test.key"
+title = "Test SSH to pivot (private key)"
+template = "ssh -p {pivot_ssh_port} -i {pivot_ssh_key} -o StrictHostKeyChecking=accept-new {pivot_user}@{pivot_host} 'id; hostname'"
+requires = ["ssh"]
+tags = ["ssh", "sanity"]
+when = "pivot.has_ssh"
+execution = "local"
+interactive = true
+
+[[command]]
+id = "pivot.ssh.test.password"
+title = "Test SSH to pivot (password via sshpass)"
+template = "sshpass -p {pivot_ssh_password} ssh -p {pivot_ssh_port} -o StrictHostKeyChecking=accept-new {pivot_user}@{pivot_host} 'id; hostname'"
+requires = ["sshpass", "ssh"]
+tags = ["ssh", "sanity"]
+when = "pivot.has_ssh && pivot.has_password"
+execution = "local"
+interactive = true

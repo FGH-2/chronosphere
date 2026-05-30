@@ -32,6 +32,10 @@ pub struct JobRecord {
     pub profile: Option<String>,
     #[serde(default)]
     pub ap: Option<String>,
+    #[serde(default)]
+    pub pivot: Option<String>,
+    #[serde(default)]
+    pub execution: Option<String>,
 }
 
 pub struct HistoryStore {
