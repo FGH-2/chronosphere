@@ -307,6 +307,10 @@ pub async fn dispatch(cli: Cli) -> Result<bool> {
                 )?;
             }
             println!("created engagement: {}", e.dir.display());
+            if let Some(parent) = config::last_engagement_marker().parent() {
+                fs::create_dir_all(parent).ok();
+            }
+            let _ = fs::write(config::last_engagement_marker(), &name);
             Ok(true)
         }
         Command::Where => {

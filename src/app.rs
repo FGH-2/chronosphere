@@ -399,10 +399,22 @@ pub struct App {
     pub _watcher: Option<notify::RecommendedWatcher>,
     pub library_reload_pending: bool,
     pub library_reload_rx: Option<tokio::sync::mpsc::UnboundedReceiver<()>>,
+    /// Engagement directory root (`--root` or default XDG path).
+    engagements_root: PathBuf,
+}
+
+/// Options from the CLI when launching the TUI (global `-e` / `--root`).
+pub struct AppBoot {
+    pub engagement: Option<String>,
+    pub root: Option<PathBuf>,
 }
 
 impl App {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(boot: AppBoot) -> Result<Self> {
+        let engagements_root = boot
+            .root
+            .clone()
+            .unwrap_or_else(config::engagements_root);
         let library_sources = collect_library_sources(None);
         let library =
             CommandLibrary::load(&library_sources.iter().map(|p| p.as_path()).collect::<Vec<_>>())
@@ -433,8 +445,13 @@ impl App {
             library_reload_pending: false,
             library_reload_rx: None,
             needs_full_redraw: false,
+            engagements_root,
         };
-        app.try_open_last_engagement().await;
+        if let Some(name) = boot.engagement {
+            app.try_open_engagement_by_name(&name);
+        } else {
+            app.try_open_last_engagement();
+        }
         app.setup_library_watcher();
         Ok(app)
     }
@@ -1078,7 +1095,7 @@ impl App {
     fn open_engagement_modal(&mut self, rest: &[&str]) {
         if rest.first() == Some(&"new") {
             let m = EngagementModal {
-                available: Engagement::list(&config::engagements_root()),
+                available: Engagement::list(&self.engagements_root),
                 cursor: 0,
                 new_name_prompt: Some(rest.get(1).map(|s| s.to_string()).unwrap_or_default()),
             };
@@ -1089,7 +1106,7 @@ impl App {
             self.switch_engagement(name);
             return;
         }
-        let avail = Engagement::list(&config::engagements_root());
+        let avail = Engagement::list(&self.engagements_root);
         let cursor = avail
             .iter()
             .position(|n| {
@@ -1149,7 +1166,7 @@ impl App {
     }
 
     fn create_engagement(&mut self, name: &str) {
-        let root = config::engagements_root();
+        let root = self.engagements_root.clone();
         if let Err(err) = fs::create_dir_all(&root) {
             self.flash_error(format!("create root: {}", err));
             return;
@@ -1164,7 +1181,7 @@ impl App {
     }
 
     fn switch_engagement(&mut self, name: &str) {
-        let dir = config::engagements_root().join(name);
+        let dir = self.engagements_root.join(name);
         match Engagement::load(dir) {
             Ok(eng) => {
                 let n = eng.meta.name.clone();
@@ -1189,7 +1206,22 @@ impl App {
         self.reload_library();
     }
 
-    async fn try_open_last_engagement(&mut self) {
+    fn try_open_engagement_by_name(&mut self, name: &str) {
+        let dir = self.engagements_root.join(name);
+        if !dir.exists() || !Engagement::meta_path(&dir).exists() {
+            self.flash_error(format!("engagement '{}' not found under {}", name, self.engagements_root.display()));
+            return;
+        }
+        match Engagement::load(dir) {
+            Ok(eng) => self.adopt_engagement(eng),
+            Err(err) => {
+                tracing::warn!(?err, "failed to load engagement from -e");
+                self.flash_error(format!("load failed: {}", err));
+            }
+        }
+    }
+
+    fn try_open_last_engagement(&mut self) {
         let marker = config::last_engagement_marker();
         let name = match fs::read_to_string(&marker) {
             Ok(s) => s.trim().to_string(),
@@ -1198,7 +1230,7 @@ impl App {
         if name.is_empty() {
             return;
         }
-        let dir = config::engagements_root().join(&name);
+        let dir = self.engagements_root.join(&name);
         if !dir.exists() {
             return;
         }

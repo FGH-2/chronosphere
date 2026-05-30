@@ -24,14 +24,18 @@ async fn main() -> Result<()> {
     init_tracing().context("init tracing")?;
     tracing::info!("starting chronosphere");
 
-    let parsed = cli::Cli::parse();
-    if cli::dispatch(parsed).await.context("dispatch cli")? {
+    let cli = cli::Cli::parse();
+    let boot = app::AppBoot {
+        engagement: cli.engagement.clone(),
+        root: cli.root.clone(),
+    };
+    if cli::dispatch(cli).await.context("dispatch cli")? {
         return Ok(());
     }
 
     // Default behavior: launch TUI.
     builtin::ensure_user_dir().ok();
-    let res = app::App::new()
+    let res = app::App::new(boot)
         .await
         .context("init app")?
         .run()
