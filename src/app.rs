@@ -383,6 +383,13 @@ impl VariableEditField {
 #[derive(Default)]
 pub struct ToolsModal;
 
+#[derive(Default)]
+pub struct HelpModal {
+    pub scroll: usize,
+    /// Last render viewport height (lines), used to clamp scroll in the key handler.
+    pub last_visible_lines: usize,
+}
+
 pub struct JobLogModal {
     pub job_id: String,
     pub title: String,
@@ -421,7 +428,7 @@ pub struct SearchHit {
 
 pub enum Modal {
     None,
-    Help,
+    Help(HelpModal),
     Engagement(EngagementModal),
     Target(TargetModal),
     Ap(ApModal),
@@ -680,6 +687,10 @@ impl App {
             self.handle_job_log_modal_key(ke);
             return;
         }
+        if matches!(self.modal, Modal::Help(_)) {
+            self.handle_help_modal_key(ke);
+            return;
+        }
         if matches!(self.modal, Modal::None)
             && self.focus == Focus::Jobs
             && matches!(ke.code, KeyCode::Enter)
@@ -688,11 +699,11 @@ impl App {
             self.key_parser.reset();
             return;
         }
-        if !matches!(self.modal, Modal::None | Modal::Help | Modal::Tools(_)) {
+        if !matches!(self.modal, Modal::None | Modal::Help(_) | Modal::Tools(_)) {
             self.handle_modal_key(ke);
             return;
         }
-        if matches!(self.modal, Modal::Help | Modal::Tools(_)) {
+        if matches!(self.modal, Modal::Help(_) | Modal::Tools(_)) {
             if matches!(ke.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?')) {
                 self.modal = Modal::None;
                 self.key_parser.reset();
@@ -760,7 +771,9 @@ impl App {
                 self.search_buf.clear();
                 self.recompute_search(true);
             }
-            Action::OpenHelp => self.modal = Modal::Help,
+            Action::OpenHelp => {
+                self.modal = Modal::Help(HelpModal::default());
+            }
             Action::SetMark(ch) => self.set_mark(ch),
             Action::JumpMark(ch) => self.jump_mark(ch),
             Action::Refresh => self.reload_library(),
@@ -848,7 +861,7 @@ impl App {
         let rest: Vec<&str> = parts.collect();
         match cmd {
             "q" | "quit" => self.running = false,
-            "help" | "h" => self.modal = Modal::Help,
+            "help" | "h" => self.modal = Modal::Help(HelpModal::default()),
             "engagement" | "eng" => self.open_engagement_modal(rest.as_slice()),
             "target" | "t" => self.open_target_modal(rest.as_slice()),
             "ap" | "aps" | "wifi" => self.open_ap_modal(rest.as_slice()),
@@ -2588,6 +2601,46 @@ impl App {
             _ => {}
         }
         ui::modals::job_log::clamp_scroll(modal, vis);
+    }
+
+    fn handle_help_modal_key(&mut self, ke: KeyEvent) {
+        match ke.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                self.modal = Modal::None;
+                self.needs_full_redraw = true;
+                return;
+            }
+            _ => {}
+        }
+
+        let Modal::Help(modal) = &mut self.modal else {
+            return;
+        };
+        let vis = modal.last_visible_lines.max(1);
+        let page = 8usize;
+
+        match ke.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                let max = ui::modals::help::max_scroll(modal, vis);
+                modal.scroll = (modal.scroll + 1).min(max);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                modal.scroll = modal.scroll.saturating_sub(1);
+            }
+            KeyCode::Char('d') if ke.modifiers.contains(KeyModifiers::CONTROL) => {
+                let max = ui::modals::help::max_scroll(modal, vis);
+                modal.scroll = (modal.scroll + page).min(max);
+            }
+            KeyCode::Char('u') if ke.modifiers.contains(KeyModifiers::CONTROL) => {
+                modal.scroll = modal.scroll.saturating_sub(page);
+            }
+            KeyCode::Char('g') => modal.scroll = 0,
+            KeyCode::Char('G') => {
+                modal.scroll = ui::modals::help::max_scroll(modal, vis);
+            }
+            _ => {}
+        }
+        ui::modals::help::clamp_scroll(modal, vis);
     }
 
     fn selected_job_record(&self) -> Option<&JobRecord> {

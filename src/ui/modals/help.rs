@@ -1,8 +1,9 @@
-use crate::app::App;
+use crate::app::{App, HelpModal, Modal};
 use crate::ui::centered_rect;
 use crate::ui::theme::Theme;
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
@@ -45,15 +46,19 @@ const HELP: &[(&str, &str)] = &[
     (":write", "save inline-edited command as new id in engagement overrides"),
 ];
 
-pub fn render(f: &mut Frame, area: Rect, _app: &App) {
-    let r = centered_rect(area, 70, 80);
-    f.render_widget(Clear, r);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(" help ", Theme::accent_bold()))
-        .border_style(Theme::border_active())
-        .style(Theme::panel());
+pub fn help_line_count() -> usize {
+    HELP.len() + 4
+}
 
+pub fn max_scroll(_modal: &HelpModal, visible_lines: usize) -> usize {
+    help_line_count().saturating_sub(visible_lines.max(1))
+}
+
+pub fn clamp_scroll(modal: &mut HelpModal, visible_lines: usize) {
+    modal.scroll = modal.scroll.min(max_scroll(modal, visible_lines));
+}
+
+fn help_lines() -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::with_capacity(HELP.len() + 4);
     lines.push(Line::from(Span::styled(
         "chronosphere — vim keymap".to_string(),
@@ -73,10 +78,70 @@ pub fn render(f: &mut Frame, area: Rect, _app: &App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "press Esc or ? to close".to_string(),
+        "scroll with j/k — Esc or ? to close".to_string(),
         Theme::muted(),
     )));
+    lines
+}
 
-    let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
-    f.render_widget(p, r);
+pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
+    let Modal::Help(modal) = &mut app.modal else {
+        return;
+    };
+
+    let r = centered_rect(area, 70, 80);
+    f.render_widget(Clear, r);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" help ", Theme::accent_bold()))
+        .border_style(Theme::border_active())
+        .style(Theme::panel());
+    f.render_widget(block.clone(), r);
+    let inner = block.inner(r);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+
+    let visible_lines = layout[0].height.max(1) as usize;
+    modal.last_visible_lines = visible_lines;
+    clamp_scroll(modal, visible_lines);
+
+    let lines = help_lines();
+    let p = Paragraph::new(lines)
+        .block(Block::default())
+        .wrap(Wrap { trim: false })
+        .scroll((modal.scroll as u16, 0));
+    f.render_widget(p, layout[0]);
+
+    let end = (modal.scroll + visible_lines).min(help_line_count());
+    let position = format!("{}/{} lines", end, help_line_count());
+    let hints = Line::from(vec![
+        Span::styled(" j/k ", Theme::magenta()),
+        Span::raw("scroll  "),
+        Span::styled("Ctrl-d/u", Theme::magenta()),
+        Span::raw(" page  "),
+        Span::styled("g/G", Theme::magenta()),
+        Span::raw(" top/bottom  "),
+        Span::styled("Esc/?", Theme::magenta()),
+        Span::raw(" close  "),
+        Span::styled(position, Theme::muted().add_modifier(Modifier::ITALIC)),
+    ]);
+    f.render_widget(Paragraph::new(hints).style(Theme::muted()), layout[1]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_scroll_respects_viewport() {
+        let mut modal = HelpModal {
+            scroll: 999,
+            last_visible_lines: 10,
+        };
+        clamp_scroll(&mut modal, 10);
+        assert_eq!(modal.scroll, max_scroll(&modal, 10));
+    }
 }

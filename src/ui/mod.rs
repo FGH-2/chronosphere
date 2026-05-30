@@ -48,7 +48,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     match &app.modal {
         Modal::None => {}
-        Modal::Help => modals::help::render(f, area, app),
+        Modal::Help(_) => modals::help::render(f, area, app),
         Modal::Engagement(_) => modals::engagement::render(f, area, app),
         Modal::Target(_) => modals::target::render(f, area, app),
         Modal::Ap(_) => modals::ap::render(f, area, app),
