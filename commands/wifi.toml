@@ -9,6 +9,7 @@ order = 12
 #   channel=6  ssid=TargetNet  capture=captures/target  wordlist=/usr/share/wordlists/rockyou.txt
 #   hcap=handshake.hc22000  cap=handshake.cap  sae_hash=sae.22000
 #   password=…  — target/captured PSK (cred profile or :variable); not spray_password
+#   (WPS/reaver hex like 42b5215e… → use connect.conf / chain; 64-char raw hex → connect.conf.hex)
 #   evil_twin_psk=WrongPassword123  eap_tls_key_pass=whatever
 #   eap=PEAP  phase2=mschapv2  cert_dir=/tmp/certs
 #   oui=60-38-E0  oui_db=/var/lib/ieee-data/oui.txt  (optional; lookup tries common paths)
@@ -1431,6 +1432,118 @@ requires = ["mdk4"]
 tags = ["dos", "mdk4"]
 
 # === Post-exploitation (connected / cracked) ===
+
+# === Connect with cracked / WPS PSK ===
+# Example after OneShot/reaver: ssid=TargetWireless  password=42b5215eb129bbaa043d7f32596f4f90
+
+[[command]]
+id = "wifi.connect.prep"
+title = "Connect prep — stop NM, kill wpa_supplicant, bring {iface} up"
+template = """sudo systemctl stop NetworkManager 2>/dev/null || true
+sudo killall wpa_supplicant dhclient 2>/dev/null || true
+sudo ip link set {iface} up"""
+tags = ["postex", "connect", "prep"]
+
+[[command]]
+id = "wifi.connect.conf"
+title = "Write WPA2-PSK conf — wpa_passphrase → /tmp/wpa-psk.conf"
+template = "wpa_passphrase '{ssid}' '{password}' | tee /tmp/wpa-psk.conf"
+requires = ["wpa_passphrase"]
+tags = ["postex", "connect", "config"]
+
+[[command]]
+id = "wifi.connect.conf.show"
+title = "Show /tmp/wpa-psk.conf (check before connect)"
+template = "cat /tmp/wpa-psk.conf"
+tags = ["postex", "connect", "config"]
+
+[[command]]
+id = "wifi.connect.conf.raw"
+title = "Write WPA2-PSK conf — network block with passphrase"
+template = """cat > /tmp/wpa-psk.conf <<EOF
+ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+
+network={{
+    ssid="{ssid}"
+    scan_ssid=1
+    key_mgmt=WPA-PSK
+    psk="{password}"
+}}
+EOF"""
+tags = ["postex", "connect", "config"]
+
+[[command]]
+id = "wifi.connect.conf.hex"
+title = "Write WPA2-PSK conf — raw 64-char hex key (psk= unquoted)"
+template = """cat > /tmp/wpa-psk.conf <<EOF
+ctrl_interface=/var/run/wpa_supplicant
+
+network={{
+    ssid="{ssid}"
+    scan_ssid=1
+    key_mgmt=WPA-PSK
+    psk={password}
+}}
+EOF"""
+tags = ["postex", "connect", "config", "hex"]
+
+[[command]]
+id = "wifi.connect.wpa_supplicant"
+title = "Connect — wpa_supplicant + dhclient on {iface}"
+template = "sudo wpa_supplicant -B -i {iface} -c /tmp/wpa-psk.conf && sleep 3 && sudo dhclient {iface}"
+tags = ["postex", "connect"]
+
+[[command]]
+id = "wifi.connect.status"
+title = "Connect — verify association and IP on {iface}"
+template = "iw dev {iface} link; ip -4 addr show dev {iface}; ip route | head -5"
+requires = ["iw", "ip"]
+tags = ["postex", "connect", "verify"]
+
+[[command]]
+id = "wifi.connect.chain"
+title = "Connect chain — prep, write conf, join, verify"
+template = """sudo systemctl stop NetworkManager 2>/dev/null || true
+sudo killall wpa_supplicant dhclient 2>/dev/null || true
+sudo ip link set {iface} up
+wpa_passphrase '{ssid}' '{password}' | sudo tee /tmp/wpa-psk.conf
+sudo wpa_supplicant -B -i {iface} -c /tmp/wpa-psk.conf
+sleep 4
+sudo dhclient {iface}
+iw dev {iface} link
+ip -4 addr show dev {iface}"""
+tags = ["postex", "connect", "chain"]
+
+[[command]]
+id = "wifi.connect.chain.hex"
+title = "Connect chain — raw 64-char hex PSK"
+template = """sudo systemctl stop NetworkManager 2>/dev/null || true
+sudo killall wpa_supplicant dhclient 2>/dev/null || true
+sudo ip link set {iface} up
+cat > /tmp/wpa-psk.conf <<EOF
+ctrl_interface=/var/run/wpa_supplicant
+
+network={{
+    ssid="{ssid}"
+    scan_ssid=1
+    key_mgmt=WPA-PSK
+    psk={password}
+}}
+EOF
+sudo wpa_supplicant -B -i {iface} -c /tmp/wpa-psk.conf
+sleep 4
+sudo dhclient {iface}
+iw dev {iface} link
+ip -4 addr show dev {iface}"""
+tags = ["postex", "connect", "chain", "hex"]
+
+[[command]]
+id = "wifi.connect.nmcli"
+title = "nmcli — connect with {ssid} + {password} (NetworkManager)"
+template = "nmcli dev wifi connect '{ssid}' password '{password}' ifname {iface}"
+requires = ["nmcli"]
+tags = ["postex", "connect", "nm"]
 
 [[command]]
 id = "wifi.wpa_supplicant"
