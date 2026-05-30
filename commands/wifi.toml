@@ -4,7 +4,8 @@ icon = "󰤨"
 order = 12
 
 # Placeholders (set via `:variable` / `chronosphere variables`, or `run … -v key=val`):
-#   iface=wlan0  mon_iface=wlan0mon  bssid=AA:BB:CC:DD:EE:FF  station=CLIENT_MAC
+#   iface=wlan0  mon_iface=mon0  bssid=AA:BB:CC:DD:EE:FF  station=CLIENT_MAC
+#   (mon_iface=mon0 for iw virtual monitor; wlan0mon if using airmon-ng)
 #   channel=6  ssid=TargetNet  capture=captures/target  wordlist=/usr/share/wordlists/rockyou.txt
 #   hcap=handshake.hc22000  cap=handshake.cap  sae_hash=sae.22000
 #   password=…  — target/captured PSK (cred profile or :variable); not spray_password
@@ -195,6 +196,91 @@ title = "iw — restore managed mode"
 template = "sudo ip link set {iface} down && sudo iw dev {iface} set type managed && sudo ip link set {iface} up"
 requires = ["iw"]
 tags = ["monitor"]
+
+[[command]]
+id = "wifi.iw.mon_iface.add"
+title = "iw — add virtual monitor iface (no airmon-ng)"
+template = "sudo iw dev {iface} interface add {mon_iface} type monitor"
+requires = ["iw"]
+tags = ["monitor", "iw"]
+
+[[command]]
+id = "wifi.mon_iface.up"
+title = "ifconfig — bring {mon_iface} up"
+template = "sudo ifconfig {mon_iface} up"
+requires = ["ifconfig"]
+tags = ["monitor"]
+
+[[command]]
+id = "wifi.mon_iface.up.ip"
+title = "ip link — bring {mon_iface} up"
+template = "sudo ip link set {mon_iface} up"
+requires = ["ip"]
+tags = ["monitor"]
+
+[[command]]
+id = "wifi.iw.mon_iface.del"
+title = "iw — delete virtual monitor iface {mon_iface}"
+template = "sudo iw dev {mon_iface} del"
+requires = ["iw"]
+tags = ["monitor", "iw", "cleanup"]
+
+[[command]]
+id = "wifi.mon_iface.down"
+title = "ifconfig — bring {mon_iface} down (before delete)"
+template = "sudo ifconfig {mon_iface} down"
+requires = ["ifconfig"]
+tags = ["monitor", "cleanup"]
+
+[[command]]
+id = "wifi.mon_iface.down.ip"
+title = "ip link — bring {mon_iface} down (before delete)"
+template = "sudo ip link set {mon_iface} down"
+requires = ["ip"]
+tags = ["monitor", "cleanup"]
+
+[[command]]
+id = "wifi.iw.mon_iface.cleanup"
+title = "cleanup — down + delete {mon_iface}, bring {iface} up"
+template = """sudo ip link set {mon_iface} down 2>/dev/null || sudo ifconfig {mon_iface} down 2>/dev/null || true && \\
+sudo iw dev {mon_iface} del 2>/dev/null || true && \\
+sudo ip link set {iface} up"""
+requires = ["iw", "ip"]
+tags = ["monitor", "iw", "cleanup"]
+
+[[command]]
+id = "wifi.iw.mon_iface.cleanup.nm"
+title = "cleanup — delete {mon_iface} + {iface} up + NetworkManager"
+template = """sudo ip link set {mon_iface} down 2>/dev/null || true && \\
+sudo iw dev {mon_iface} del 2>/dev/null || true && \\
+sudo ip link set {iface} up && \\
+sudo systemctl start NetworkManager 2>/dev/null || sudo service NetworkManager start 2>/dev/null || true"""
+requires = ["iw", "ip"]
+tags = ["monitor", "iw", "cleanup", "nm"]
+
+[[command]]
+id = "wifi.iw.monitor.cleanup"
+title = "cleanup — restore {iface} to managed (after iw set type monitor)"
+template = "sudo ip link set {iface} down && sudo iw dev {iface} set type managed && sudo ip link set {iface} up"
+requires = ["iw", "ip"]
+tags = ["monitor", "cleanup"]
+
+[[command]]
+id = "wifi.iw.monitor.cleanup.nm"
+title = "cleanup — managed {iface} + restart NetworkManager"
+template = """sudo ip link set {iface} down && sudo iw dev {iface} set type managed && sudo ip link set {iface} up && \\
+sudo systemctl start NetworkManager 2>/dev/null || sudo service NetworkManager start 2>/dev/null || true"""
+requires = ["iw", "ip"]
+tags = ["monitor", "cleanup", "nm"]
+
+[[command]]
+id = "wifi.chain.iw_mon_wps"
+title = "chain: iw mon0 → ifconfig up → airodump-ng --wps"
+template = """sudo iw dev {iface} interface add {mon_iface} type monitor && \\
+sudo ifconfig {mon_iface} up && \\
+sudo airodump-ng --wps {mon_iface}"""
+requires = ["iw", "ifconfig", "airodump-ng"]
+tags = ["chain", "monitor", "scan", "wps"]
 
 [[command]]
 id = "wifi.chain.monitor_scan"
