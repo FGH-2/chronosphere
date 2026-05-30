@@ -310,6 +310,7 @@ mod tests {
             log_path: Some(path.clone()),
             target: None,
             profile: None,
+            ap: None,
         };
         (path, job)
     }

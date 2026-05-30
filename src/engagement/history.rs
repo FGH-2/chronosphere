@@ -30,6 +30,8 @@ pub struct JobRecord {
     pub log_path: Option<PathBuf>,
     pub target: Option<String>,
     pub profile: Option<String>,
+    #[serde(default)]
+    pub ap: Option<String>,
 }
 
 pub struct HistoryStore {

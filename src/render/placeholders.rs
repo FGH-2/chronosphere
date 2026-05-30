@@ -30,6 +30,14 @@ pub const BUILTIN_PLACEHOLDERS: &[&str] = &[
     "domain_user",
     "user_at_domain",
     "cred_kind",
+    "ssid",
+    "bssid",
+    "channel",
+    "station",
+    "wps_pin",
+    "wpa_psk",
+    "capture",
+    "vendor",
 ];
 
 pub fn is_builtin_placeholder(name: &str) -> bool {

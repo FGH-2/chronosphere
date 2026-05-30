@@ -53,6 +53,7 @@ impl State {
     fn render_ctx(
         &self,
         target_override: Option<&str>,
+        ap_override: Option<&str>,
         cred_override: Option<&str>,
         extra_vars: &serde_json::Map<String, Value>,
     ) -> RenderContext {
@@ -63,6 +64,12 @@ impl State {
                 .or_else(|| e.targets.active());
             if let Some(t) = t {
                 ctx.target = Some(t.clone());
+            }
+            let a = ap_override
+                .and_then(|n| e.aps.aps.iter().find(|a| a.name == n))
+                .or_else(|| e.aps.active());
+            if let Some(a) = a {
+                ctx.ap = Some(a.clone());
             }
             let p = cred_override
                 .and_then(|n| e.profiles.profiles.iter().find(|p| p.name == n))
@@ -148,6 +155,7 @@ pub fn list_tools() -> Value {
                     "properties": {
                         "id": {"type": "string"},
                         "target": {"type": "string", "description": "Override target for this call."},
+                        "ap": {"type": "string", "description": "Override access point for this call."},
                         "creds": {"type": "string", "description": "Override credential profile for this call."},
                         "vars": {"type": "object", "description": "Extra KEY=VALUE placeholder overrides.", "additionalProperties": {"type": "string"}}
                     },
@@ -163,6 +171,7 @@ pub fn list_tools() -> Value {
                     "properties": {
                         "id": {"type": "string"},
                         "target": {"type": "string"},
+                        "ap": {"type": "string"},
                         "creds": {"type": "string"},
                         "vars": {"type": "object", "additionalProperties": {"type": "string"}}
                     },
@@ -178,6 +187,7 @@ pub fn list_tools() -> Value {
                     "properties": {
                         "id": {"type": "string"},
                         "target": {"type": "string"},
+                        "ap": {"type": "string"},
                         "creds": {"type": "string"},
                         "vars": {"type": "object", "additionalProperties": {"type": "string"}},
                         "dry_run": {"type": "boolean", "default": false},
@@ -392,6 +402,15 @@ async fn tool_engagement_info(state: Arc<Mutex<State>>) -> Result<Value> {
                 "lhost": t.lhost,
                 "lport": t.lport,
             })),
+            "active_ap": e.aps.active().map(|a| json!({
+                "name": a.name,
+                "ssid": a.ssid,
+                "bssid": a.bssid,
+                "channel": a.channel,
+                "wpa_psk": a.wpa_psk.as_ref().map(|_| "<set>"),
+                "wps_pin": a.wps_pin,
+                "capture": a.capture,
+            })),
             "active_creds": e.profiles.active().map(|p| json!({
                 "name": p.name,
                 "kind": p.kind.as_str(),
@@ -399,6 +418,7 @@ async fn tool_engagement_info(state: Arc<Mutex<State>>) -> Result<Value> {
                 "domain": p.domain,
             })),
             "target_count": e.targets.targets.len(),
+            "ap_count": e.aps.aps.len(),
             "creds_count": e.profiles.profiles.len(),
             "variables_set": e.variables.values.values().filter(|v| !v.is_empty()).count(),
             "variables_total": e.variables.values.len(),
@@ -501,6 +521,7 @@ async fn tool_search(args: Value, state: Arc<Mutex<State>>) -> Result<Value> {
 struct RenderArgs {
     id: String,
     target: Option<String>,
+    ap: Option<String>,
     creds: Option<String>,
     vars: Option<serde_json::Map<String, Value>>,
 }
@@ -510,7 +531,12 @@ async fn tool_show_command(args: Value, state: Arc<Mutex<State>>) -> Result<Valu
     let s = state.lock().await;
     let (cat_id, cmd) = find_command(&s, &args.id)?;
     let extra = args.vars.unwrap_or_default();
-    let ctx = s.render_ctx(args.target.as_deref(), args.creds.as_deref(), &extra);
+    let ctx = s.render_ctx(
+        args.target.as_deref(),
+        args.ap.as_deref(),
+        args.creds.as_deref(),
+        &extra,
+    );
     let tmpl =
         cmd.applicable_template(&|w| crate::render::condition::evaluate(w, &ctx));
     let rendered = render::render(tmpl, &ctx).map_err(|e| anyhow!("{}", e))?;
@@ -533,7 +559,12 @@ async fn tool_render_command(args: Value, state: Arc<Mutex<State>>) -> Result<Va
     let s = state.lock().await;
     let (_, cmd) = find_command(&s, &args.id)?;
     let extra = args.vars.unwrap_or_default();
-    let ctx = s.render_ctx(args.target.as_deref(), args.creds.as_deref(), &extra);
+    let ctx = s.render_ctx(
+        args.target.as_deref(),
+        args.ap.as_deref(),
+        args.creds.as_deref(),
+        &extra,
+    );
     let tmpl =
         cmd.applicable_template(&|w| crate::render::condition::evaluate(w, &ctx));
     let rendered = render::render(tmpl, &ctx).map_err(|e| anyhow!("{}", e))?;
@@ -547,6 +578,7 @@ async fn tool_render_command(args: Value, state: Arc<Mutex<State>>) -> Result<Va
 struct RunArgs {
     id: String,
     target: Option<String>,
+    ap: Option<String>,
     creds: Option<String>,
     vars: Option<serde_json::Map<String, Value>>,
     dry_run: Option<bool>,
@@ -558,12 +590,17 @@ async fn tool_run_command(args: Value, state: Arc<Mutex<State>>) -> Result<Value
     let dry = args.dry_run.unwrap_or(false);
     let timeout = std::time::Duration::from_secs(args.timeout_seconds.unwrap_or(600));
 
-    let (resolved, job_id, log_path, eng_dir, target_name, profile_name, command_id, command_title) = {
+    let (resolved, job_id, log_path, eng_dir, target_name, ap_name, profile_name, command_id, command_title) = {
         let s = state.lock().await;
         let eng = s.engagement.as_ref().ok_or_else(|| anyhow!("no engagement loaded"))?;
         let (_, cmd) = find_command(&s, &args.id)?;
         let extra = args.vars.clone().unwrap_or_default();
-        let ctx = s.render_ctx(args.target.as_deref(), args.creds.as_deref(), &extra);
+        let ctx = s.render_ctx(
+            args.target.as_deref(),
+            args.ap.as_deref(),
+            args.creds.as_deref(),
+            &extra,
+        );
         let tmpl =
             cmd.applicable_template(&|w| crate::render::condition::evaluate(w, &ctx));
         let rendered = render::render(tmpl, &ctx).map_err(|e| anyhow!("{}", e))?;
@@ -571,6 +608,7 @@ async fn tool_run_command(args: Value, state: Arc<Mutex<State>>) -> Result<Value
         let log_path = Engagement::jobs_dir(&eng.dir).join(format!("{}.log", job_id));
         let eng_dir = eng.dir.clone();
         let target_name = eng.targets.active().map(|t| t.name.clone());
+        let ap_name = eng.aps.active().map(|a| a.name.clone());
         let profile_name = eng.profiles.active().map(|p| p.name.clone());
         let command_id = cmd.id.clone();
         let command_title = cmd.title.clone();
@@ -580,6 +618,7 @@ async fn tool_run_command(args: Value, state: Arc<Mutex<State>>) -> Result<Value
             log_path,
             eng_dir,
             target_name,
+            ap_name,
             profile_name,
             command_id,
             command_title,
@@ -609,6 +648,7 @@ async fn tool_run_command(args: Value, state: Arc<Mutex<State>>) -> Result<Value
             log_path: Some(log_path.clone()),
             target: target_name.clone(),
             profile: profile_name.clone(),
+            ap: ap_name.clone(),
         };
         eng.history.append(&rec)?;
     }
@@ -781,6 +821,7 @@ async fn tool_list_jobs(args: Value, state: Arc<Mutex<State>>) -> Result<Value> 
                 "started_at": j.started_at.to_rfc3339(),
                 "finished_at": j.finished_at.map(|t| t.to_rfc3339()),
                 "target": j.target,
+                "ap": j.ap,
                 "profile": j.profile,
                 "resolved": j.resolved,
             })

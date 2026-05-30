@@ -16,6 +16,7 @@ pub struct SpawnRequest {
     pub interactive: bool,
     pub target: Option<String>,
     pub profile: Option<String>,
+    pub ap: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +105,7 @@ impl Executor {
             log_path: Some(log_path),
             target: req.target,
             profile: req.profile,
+            ap: req.ap,
         })
     }
 

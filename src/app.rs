@@ -1,7 +1,7 @@
 use crate::clipboard;
 use crate::config;
 use crate::engagement::{
-    CredKind, CredentialProfile, Engagement, JobRecord, JobStatus, Target,
+    AccessPoint, CredKind, CredentialProfile, Engagement, JobRecord, JobStatus, Target,
 };
 use crate::exec::{Executor, FocusResult, SpawnRequest};
 use crate::input::{apply_to_string, apply_to_textarea, text_edit_action, TextEditAction};
@@ -126,6 +126,73 @@ impl TargetEditField {
             TargetEditField::Lhost,
             TargetEditField::Lport,
             TargetEditField::Notes,
+        ]
+    }
+}
+
+#[derive(Default)]
+pub struct ApModal {
+    pub state: ApModalState,
+}
+
+pub enum ApModalState {
+    List {
+        cursor: usize,
+    },
+    Edit {
+        fields: Vec<(ApEditField, String)>,
+        focused: usize,
+        original_name: Option<String>,
+    },
+}
+
+impl Default for ApModalState {
+    fn default() -> Self {
+        ApModalState::List { cursor: 0 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApEditField {
+    Name,
+    Ssid,
+    Bssid,
+    Channel,
+    Station,
+    WpaPsk,
+    WpsPin,
+    Capture,
+    Vendor,
+    Notes,
+}
+
+impl ApEditField {
+    pub fn label(self) -> &'static str {
+        match self {
+            ApEditField::Name => "name",
+            ApEditField::Ssid => "ssid",
+            ApEditField::Bssid => "bssid",
+            ApEditField::Channel => "channel",
+            ApEditField::Station => "station",
+            ApEditField::WpaPsk => "wpa_psk",
+            ApEditField::WpsPin => "wps_pin",
+            ApEditField::Capture => "capture",
+            ApEditField::Vendor => "vendor",
+            ApEditField::Notes => "notes",
+        }
+    }
+    pub fn all() -> &'static [ApEditField] {
+        &[
+            ApEditField::Name,
+            ApEditField::Ssid,
+            ApEditField::Bssid,
+            ApEditField::Channel,
+            ApEditField::Station,
+            ApEditField::WpaPsk,
+            ApEditField::WpsPin,
+            ApEditField::Capture,
+            ApEditField::Vendor,
+            ApEditField::Notes,
         ]
     }
 }
@@ -286,6 +353,7 @@ pub enum Modal {
     Help,
     Engagement(EngagementModal),
     Target(TargetModal),
+    Ap(ApModal),
     Creds(CredsModal),
     Variables(VariablesModal),
     Tools(ToolsModal),
@@ -694,6 +762,7 @@ impl App {
             "help" | "h" => self.modal = Modal::Help,
             "engagement" | "eng" => self.open_engagement_modal(rest.as_slice()),
             "target" | "t" => self.open_target_modal(rest.as_slice()),
+            "ap" | "aps" | "wifi" => self.open_ap_modal(rest.as_slice()),
             "creds" | "c" => self.open_creds_modal(rest.as_slice()),
             "variable" | "variables" | "var" | "vars" | "v" => {
                 self.open_variables_modal(rest.as_slice())
@@ -998,6 +1067,7 @@ impl App {
         match &mut self.modal {
             Modal::Engagement(_) => self.handle_engagement_modal(ke),
             Modal::Target(_) => self.handle_target_modal(ke),
+            Modal::Ap(_) => self.handle_ap_modal(ke),
             Modal::Creds(_) => self.handle_creds_modal(ke),
             Modal::Variables(_) => self.handle_variables_modal(ke),
             _ => {}
@@ -1160,6 +1230,145 @@ impl App {
         self.modal = Modal::Target(TargetModal {
             state: TargetModalState::List { cursor: 0 },
         });
+    }
+
+    fn open_ap_modal(&mut self, rest: &[&str]) {
+        if self.engagement.is_none() {
+            self.flash_error("create or switch to an engagement first (:engagement new <name>)".into());
+            return;
+        }
+        if let Some(name) = rest.first() {
+            if let Some(eng) = self.engagement.as_mut() {
+                if eng.aps.set_active(name) {
+                    let _ = eng.save_aps();
+                    self.flash_ok(format!("AP '{}' active", name));
+                } else {
+                    self.flash_error(format!("no AP named '{}'", name));
+                }
+            }
+            return;
+        }
+        self.modal = Modal::Ap(ApModal {
+            state: ApModalState::List { cursor: 0 },
+        });
+    }
+
+    fn handle_ap_modal(&mut self, ke: KeyEvent) {
+        let m = match &mut self.modal {
+            Modal::Ap(m) => m,
+            _ => return,
+        };
+        match &mut m.state {
+            ApModalState::List { cursor } => {
+                let eng = self.engagement.as_mut();
+                let len = eng.as_ref().map(|e| e.aps.aps.len()).unwrap_or(0);
+                match ke.code {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if len > 0 && *cursor + 1 < len {
+                            *cursor += 1;
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if *cursor > 0 {
+                            *cursor -= 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if let Some(eng) = eng {
+                            if let Some(name) = eng.aps.aps.get(*cursor).map(|a| a.name.clone()) {
+                                eng.aps.set_active(&name);
+                                let _ = eng.save_aps();
+                            }
+                        }
+                    }
+                    KeyCode::Char('a') => {
+                        let fields = ApEditField::all()
+                            .iter()
+                            .map(|f| (*f, String::new()))
+                            .collect();
+                        m.state = ApModalState::Edit {
+                            fields,
+                            focused: 0,
+                            original_name: None,
+                        };
+                    }
+                    KeyCode::Char('e') => {
+                        if let Some(eng) = eng {
+                            if let Some(a) = eng.aps.aps.get(*cursor) {
+                                let fields = ap_to_fields(a);
+                                m.state = ApModalState::Edit {
+                                    fields,
+                                    focused: 0,
+                                    original_name: Some(a.name.clone()),
+                                };
+                            }
+                        }
+                    }
+                    KeyCode::Char('d') => {
+                        if let Some(eng) = eng {
+                            if let Some(a) = eng.aps.aps.get(*cursor).cloned() {
+                                eng.aps.remove(&a.name);
+                                let _ = eng.save_aps();
+                                if *cursor > 0 {
+                                    *cursor -= 1;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            ApModalState::Edit {
+                fields,
+                focused,
+                original_name,
+            } => match ke.code {
+                KeyCode::Tab | KeyCode::Down => {
+                    *focused = (*focused + 1) % fields.len();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    *focused = if *focused == 0 {
+                        fields.len() - 1
+                    } else {
+                        *focused - 1
+                    };
+                }
+                KeyCode::Enter => {
+                    let new_ap = match fields_to_ap(fields) {
+                        Ok(a) => a,
+                        Err(err) => {
+                            self.flash_error(format!("invalid AP: {}", err));
+                            return;
+                        }
+                    };
+                    let original = original_name.clone();
+                    if let Some(eng) = self.engagement.as_mut() {
+                        if let Some(orig) = original {
+                            if orig != new_ap.name {
+                                eng.aps.remove(&orig);
+                                if eng.aps.active.as_deref() == Some(&orig) {
+                                    eng.aps.active = Some(new_ap.name.clone());
+                                }
+                            }
+                        }
+                        let n = new_ap.name.clone();
+                        eng.aps.upsert(new_ap);
+                        if eng.aps.active.is_none() {
+                            eng.aps.active = Some(n);
+                        }
+                        let _ = eng.save_aps();
+                    }
+                    self.modal = Modal::Ap(ApModal {
+                        state: ApModalState::List { cursor: 0 },
+                    });
+                }
+                _ => {
+                    if let Some((_, v)) = fields.get_mut(*focused) {
+                        apply_to_string(v, text_edit_action(&ke));
+                    }
+                }
+            },
+        }
     }
 
     fn handle_target_modal(&mut self, ke: KeyEvent) {
@@ -1719,6 +1928,10 @@ impl App {
                 .engagement
                 .as_ref()
                 .and_then(|e| e.active_profile().map(|p| p.name.clone())),
+            ap: self
+                .engagement
+                .as_ref()
+                .and_then(|e| e.active_ap().map(|a| a.name.clone())),
         };
         match exe.spawn(req) {
             Ok(rec) => {
@@ -2174,6 +2387,7 @@ impl App {
         let mut ctx = RenderContext::default();
         if let Some(eng) = &self.engagement {
             ctx.target = eng.active_target().cloned();
+            ctx.ap = eng.active_ap().cloned();
             ctx.profile = eng.active_profile().cloned();
             ctx.globals = eng.variables.values.clone();
         }
@@ -2370,6 +2584,68 @@ fn fields_to_target(fields: &[(TargetEditField, String)]) -> Result<Target> {
         anyhow::bail!("name required");
     }
     Ok(t)
+}
+
+fn ap_to_fields(a: &AccessPoint) -> Vec<(ApEditField, String)> {
+    ApEditField::all()
+        .iter()
+        .map(|f| {
+            let v = match f {
+                ApEditField::Name => a.name.clone(),
+                ApEditField::Ssid => a.ssid.clone().unwrap_or_default(),
+                ApEditField::Bssid => a.bssid.clone().unwrap_or_default(),
+                ApEditField::Channel => a.channel.clone().unwrap_or_default(),
+                ApEditField::Station => a.station.clone().unwrap_or_default(),
+                ApEditField::WpaPsk => a.wpa_psk.clone().unwrap_or_default(),
+                ApEditField::WpsPin => a.wps_pin.clone().unwrap_or_default(),
+                ApEditField::Capture => a.capture.clone().unwrap_or_default(),
+                ApEditField::Vendor => a.vendor.clone().unwrap_or_default(),
+                ApEditField::Notes => a.notes.clone().unwrap_or_default(),
+            };
+            (*f, v)
+        })
+        .collect()
+}
+
+fn fields_to_ap(fields: &[(ApEditField, String)]) -> Result<AccessPoint> {
+    let mut a = AccessPoint::default();
+    for (f, v) in fields {
+        let trimmed = v.trim();
+        match f {
+            ApEditField::Name => a.name = trimmed.to_string(),
+            ApEditField::Ssid => {
+                a.ssid = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::Bssid => {
+                a.bssid = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::Channel => {
+                a.channel = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::Station => {
+                a.station = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::WpaPsk => {
+                a.wpa_psk = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::WpsPin => {
+                a.wps_pin = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::Capture => {
+                a.capture = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::Vendor => {
+                a.vendor = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+            ApEditField::Notes => {
+                a.notes = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            }
+        }
+    }
+    if a.name.is_empty() {
+        anyhow::bail!("name required");
+    }
+    Ok(a)
 }
 
 fn profile_to_fields(p: &CredentialProfile) -> Vec<(CredEditField, String)> {

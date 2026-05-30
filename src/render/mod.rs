@@ -90,7 +90,7 @@ fn expand_placeholders(template: &str, ctx: &RenderContext) -> PlaceholderPass {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engagement::{CredKind, CredentialProfile, Target};
+    use crate::engagement::{AccessPoint, CredKind, CredentialProfile, Target};
 
     fn ctx() -> RenderContext {
         let mut c = RenderContext::default();
@@ -141,6 +141,28 @@ mod tests {
         c.target.as_mut().unwrap().hostname = Some("sub1.target.htb".into());
         let out = render("Host: FUZZ.{vhost_root}", &c).unwrap();
         assert_eq!(out.resolved, "Host: FUZZ.target.htb");
+    }
+
+    #[test]
+    fn ap_fields_override_globals() {
+        let mut c = RenderContext::default();
+        c.ap = Some(AccessPoint {
+            name: "htw".into(),
+            ssid: Some("HackTheWireless".into()),
+            bssid: Some("86:FC:9F:5D:67:4E".into()),
+            channel: Some("6".into()),
+            station: None,
+            wpa_psk: Some("42b5215eb129abec043d7f32596f4f90".into()),
+            wps_pin: None,
+            capture: None,
+            vendor: None,
+            notes: None,
+        });
+        c.globals.insert("ssid".into(), "OtherNet".into());
+        let out = render("reaver -b {bssid} -c {channel} -p {wpa_psk}", &c).unwrap();
+        assert!(out.resolved.contains("86:FC:9F:5D:67:4E"));
+        assert!(out.resolved.contains("42b5215e"));
+        assert!(!out.resolved.contains("OtherNet"));
     }
 
     #[test]

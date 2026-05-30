@@ -45,6 +45,20 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         })
         .unwrap_or_else(|| "no creds".to_string());
 
+    let ap = app
+        .engagement
+        .as_ref()
+        .and_then(|e| e.active_ap())
+        .map(|a| {
+            let ident = a
+                .ssid
+                .clone()
+                .or_else(|| a.bssid.clone())
+                .unwrap_or_else(|| a.name.clone());
+            format!("{} ({})", ident, a.name)
+        })
+        .unwrap_or_else(|| "no ap".to_string());
+
     let jobs = format!(
         "● {}  ✓ {}  ✗ {}",
         app.jobs_running_count(),
@@ -65,6 +79,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(engagement, Theme::magenta()),
         Span::raw(" │ "),
         Span::styled(target, Theme::accent()),
+        Span::raw(" │ "),
+        Span::styled(ap, Theme::accent()),
         Span::raw(" │ "),
         Span::styled(profile, Theme::accent_bold()),
         Span::raw(" │ "),

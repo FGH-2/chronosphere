@@ -1,18 +1,29 @@
-use crate::engagement::{CredKind, CredentialProfile, Target};
+use crate::engagement::{AccessPoint, CredKind, CredentialProfile, Target};
 use std::collections::BTreeMap;
 
 /// Bag of values used by the placeholder expander. Anything the templates need can come from here.
 #[derive(Debug, Clone, Default)]
 pub struct RenderContext {
     pub target: Option<Target>,
+    pub ap: Option<AccessPoint>,
     pub profile: Option<CredentialProfile>,
-    /// Global defaults (wordlist, userlist, etc.) keyed by placeholder name.
+    /// Global defaults (wordlist, iface, …) keyed by placeholder name.
     pub globals: BTreeMap<String, String>,
 }
 
 impl RenderContext {
     pub fn resolve(&self, name: &str) -> Option<String> {
         match name {
+            "ssid" => self.ap_or_global("ssid", |a| a.ssid.clone()),
+            "bssid" => self.ap_or_global("bssid", |a| a.bssid.clone()),
+            "channel" => self.ap_or_global("channel", |a| a.channel.clone()),
+            "station" => self.ap_or_global("station", |a| a.station.clone()),
+            "wps_pin" => self.ap_or_global("wps_pin", |a| a.wps_pin.clone()),
+            "wpa_psk" => self.ap_or_global("wpa_psk", |a| a.wpa_psk.clone()),
+            "capture" => self
+                .ap_or_global("capture", |a| a.capture.clone())
+                .or_else(|| self.ap.as_ref().map(|a| format!("captures/{}", a.name))),
+            "vendor" => self.ap_or_global("vendor", |a| a.vendor.clone()),
             "target" => self
                 .target
                 .as_ref()
@@ -199,6 +210,9 @@ impl RenderContext {
                     .is_some(),
             ),
             "target.has_lhost" => Some(self.target.as_ref().and_then(|t| t.lhost.clone()).is_some()),
+            "ap.has_ssid" => Some(self.ap.as_ref().and_then(|a| a.ssid.clone()).is_some()),
+            "ap.has_bssid" => Some(self.ap.as_ref().and_then(|a| a.bssid.clone()).is_some()),
+            "ap.has_wpa_psk" => Some(self.ap.as_ref().and_then(|a| a.wpa_psk.clone()).is_some()),
             "creds.has_domain" => Some(self.profile.as_ref().and_then(|p| p.domain.clone()).is_some()),
             "creds.authenticated" => Some(matches!(
                 self.profile.as_ref().map(|p| p.kind),
@@ -221,7 +235,23 @@ impl RenderContext {
             "creds.username" => self.profile.as_ref().map(|p| p.username.clone()),
             "creds.domain" => self.profile.as_ref().and_then(|p| p.domain.clone()),
             "target.name" => self.target.as_ref().map(|t| t.name.clone()),
+            "ap.name" => self.ap.as_ref().map(|a| a.name.clone()),
             _ => None,
         }
+    }
+
+    fn ap_or_global<F>(&self, key: &str, from_ap: F) -> Option<String>
+    where
+        F: FnOnce(&AccessPoint) -> Option<String>,
+    {
+        if let Some(ap) = self.ap.as_ref() {
+            if let Some(v) = from_ap(ap).filter(|s| !s.is_empty()) {
+                return Some(v);
+            }
+        }
+        self.globals
+            .get(key)
+            .cloned()
+            .filter(|s| !s.is_empty())
     }
 }

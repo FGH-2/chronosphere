@@ -1,8 +1,10 @@
+pub mod ap;
 pub mod creds;
 pub mod history;
 pub mod target;
 pub mod variables;
 
+pub use ap::{AccessPoint, ApStore};
 pub use creds::{CredKind, CredentialProfile, ProfileStore};
 pub use history::{HistoryStore, JobRecord, JobStatus};
 pub use target::{Target, TargetStore};
@@ -21,11 +23,12 @@ pub struct EngagementMeta {
     pub notes: Option<String>,
 }
 
-/// A loaded engagement: holds its directory and the three mutable stores (targets, profiles, history).
+/// A loaded engagement: targets, APs, cred profiles, variables, and job history.
 pub struct Engagement {
     pub meta: EngagementMeta,
     pub dir: PathBuf,
     pub targets: TargetStore,
+    pub aps: ApStore,
     pub profiles: ProfileStore,
     pub variables: VariableStore,
     pub history: HistoryStore,
@@ -37,6 +40,9 @@ impl Engagement {
     }
     pub fn targets_path(dir: &Path) -> PathBuf {
         dir.join("targets.json")
+    }
+    pub fn aps_path(dir: &Path) -> PathBuf {
+        dir.join("aps.json")
     }
     pub fn creds_path(dir: &Path) -> PathBuf {
         dir.join("creds.json")
@@ -81,6 +87,8 @@ impl Engagement {
         )?;
         let targets = TargetStore::new();
         targets.save(&Self::targets_path(&dir))?;
+        let aps = ApStore::new();
+        aps.save(&Self::aps_path(&dir))?;
         let profiles = ProfileStore::new();
         profiles.save(&Self::creds_path(&dir))?;
         let variables = VariableStore::new();
@@ -91,6 +99,7 @@ impl Engagement {
             meta,
             dir,
             targets,
+            aps,
             profiles,
             variables,
             history,
@@ -107,6 +116,10 @@ impl Engagement {
             tracing::warn!(?err, "could not load targets.json; starting fresh");
             TargetStore::new()
         });
+        let aps = ApStore::load(&Self::aps_path(&dir)).unwrap_or_else(|err| {
+            tracing::warn!(?err, "could not load aps.json; starting fresh");
+            ApStore::new()
+        });
         let profiles = ProfileStore::load(&Self::creds_path(&dir)).unwrap_or_else(|err| {
             tracing::warn!(?err, "could not load creds.json; starting fresh");
             ProfileStore::new()
@@ -122,6 +135,7 @@ impl Engagement {
             meta,
             dir,
             targets,
+            aps,
             profiles,
             variables,
             history,
@@ -147,12 +161,18 @@ impl Engagement {
     pub fn active_target(&self) -> Option<&Target> {
         self.targets.active()
     }
+    pub fn active_ap(&self) -> Option<&AccessPoint> {
+        self.aps.active()
+    }
     pub fn active_profile(&self) -> Option<&CredentialProfile> {
         self.profiles.active()
     }
 
     pub fn save_targets(&self) -> Result<()> {
         self.targets.save(&Self::targets_path(&self.dir))
+    }
+    pub fn save_aps(&self) -> Result<()> {
+        self.aps.save(&Self::aps_path(&self.dir))
     }
     pub fn save_profiles(&self) -> Result<()> {
         self.profiles.save(&Self::creds_path(&self.dir))

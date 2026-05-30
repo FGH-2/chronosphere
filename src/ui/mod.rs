@@ -51,6 +51,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Modal::Help => modals::help::render(f, area, app),
         Modal::Engagement(_) => modals::engagement::render(f, area, app),
         Modal::Target(_) => modals::target::render(f, area, app),
+        Modal::Ap(_) => modals::ap::render(f, area, app),
         Modal::Creds(_) => modals::creds::render(f, area, app),
         Modal::Variables(_) => modals::variables::render(f, area, app),
         Modal::Tools(_) => modals::tools::render(f, area, app),

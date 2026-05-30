@@ -4,7 +4,7 @@
 
 use crate::config;
 use crate::engagement::{
-    CredKind, CredentialProfile, Engagement, JobRecord, JobStatus, Target,
+    AccessPoint, CredKind, CredentialProfile, Engagement, JobRecord, JobStatus, Target,
 };
 use crate::library::CommandLibrary;
 use crate::render::{self, RenderContext};
@@ -33,6 +33,10 @@ pub struct Cli {
     /// Credential profile name to apply for this invocation.
     #[arg(short = 'c', long, global = true)]
     pub creds: Option<String>,
+
+    /// Access point name to apply for this invocation.
+    #[arg(short = 'a', long, global = true)]
+    pub ap: Option<String>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -92,6 +96,10 @@ pub enum Command {
     /// Target CRUD.
     #[command(subcommand)]
     Targets(TargetCmd),
+
+    /// WiFi access point CRUD.
+    #[command(subcommand)]
+    Aps(ApCmd),
 
     /// Credential CRUD.
     #[command(subcommand)]
@@ -180,6 +188,38 @@ pub enum TargetCmd {
         lhost: Option<String>,
         #[arg(long)]
         lport: Option<u16>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    Use {
+        name: String,
+    },
+    Remove {
+        name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ApCmd {
+    List,
+    Add {
+        name: String,
+        #[arg(long)]
+        ssid: Option<String>,
+        #[arg(long)]
+        bssid: Option<String>,
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long)]
+        station: Option<String>,
+        #[arg(long)]
+        wpa_psk: Option<String>,
+        #[arg(long)]
+        wps_pin: Option<String>,
+        #[arg(long)]
+        capture: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
         #[arg(long)]
         notes: Option<String>,
     },
@@ -412,11 +452,12 @@ alias chronosphere='{bin}'
                     let e = open_engagement(&root, cli.engagement.as_deref())?;
                     for job in e.history.recent.iter().rev() {
                         println!(
-                            "{} {:?}  {}  ({})",
+                            "{} {:?}  {}  ({}/{})",
                             job.id,
                             job.status,
                             job.command_id.as_deref().unwrap_or("-"),
-                            job.target.as_deref().unwrap_or("?")
+                            job.target.as_deref().unwrap_or("?"),
+                            job.ap.as_deref().unwrap_or("-"),
                         );
                     }
                 }
@@ -449,6 +490,7 @@ alias chronosphere='{bin}'
                 &root,
                 cli.engagement.as_deref(),
                 &cli.target,
+                &cli.ap,
                 &cli.creds,
                 &id,
                 &vars,
@@ -464,6 +506,7 @@ alias chronosphere='{bin}'
                     &root,
                     cli.engagement.as_deref(),
                     &cli.target,
+                    &cli.ap,
                     &cli.creds,
                     &id,
                     &[],
@@ -482,6 +525,7 @@ alias chronosphere='{bin}'
                 &root,
                 cli.engagement.as_deref(),
                 &cli.target,
+                &cli.ap,
                 &cli.creds,
                 &id,
                 &vars,
@@ -533,6 +577,68 @@ alias chronosphere='{bin}'
                 TargetCmd::Remove { name } => {
                     e.targets.remove(&name);
                     e.save_targets()?;
+                }
+            }
+            Ok(true)
+        }
+        Command::Aps(c) => {
+            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            match c {
+                ApCmd::List => {
+                    let active = e.aps.active().map(|a| a.name.clone());
+                    for a in &e.aps.aps {
+                        let star = if Some(&a.name) == active.as_ref() { "*" } else { " " };
+                        println!(
+                            "{} {:<12}  ssid={}  bssid={}  psk={}",
+                            star,
+                            a.name,
+                            a.ssid.as_deref().unwrap_or("-"),
+                            a.bssid.as_deref().unwrap_or("-"),
+                            if a.wpa_psk.as_deref().is_some_and(|s| !s.is_empty()) {
+                                "set"
+                            } else {
+                                "-"
+                            },
+                        );
+                    }
+                }
+                ApCmd::Add {
+                    name,
+                    ssid,
+                    bssid,
+                    channel,
+                    station,
+                    wpa_psk,
+                    wps_pin,
+                    capture,
+                    vendor,
+                    notes,
+                } => {
+                    let activate = name.clone();
+                    e.aps.upsert(AccessPoint {
+                        name,
+                        ssid,
+                        bssid,
+                        channel,
+                        station,
+                        wpa_psk,
+                        wps_pin,
+                        capture,
+                        vendor,
+                        notes,
+                    });
+                    e.aps.set_active(&activate);
+                    e.save_aps()?;
+                }
+                ApCmd::Use { name } => {
+                    if !e.aps.set_active(&name) {
+                        bail!("no AP named {}", name);
+                    }
+                    e.save_aps()?;
+                }
+                ApCmd::Remove { name } => {
+                    e.aps.remove(&name);
+                    e.save_aps()?;
                 }
             }
             Ok(true)
@@ -635,6 +741,7 @@ fn open_engagement(root: &Path, name: Option<&str>) -> Result<Engagement> {
 fn build_context(
     e: &Engagement,
     target_override: &Option<String>,
+    ap_override: &Option<String>,
     cred_override: &Option<String>,
     extra_vars: &[String],
 ) -> RenderContext {
@@ -645,6 +752,13 @@ fn build_context(
         .or_else(|| e.targets.active());
     if let Some(t) = active_t {
         ctx.target = Some(t.clone());
+    }
+    let active_ap = ap_override
+        .as_deref()
+        .and_then(|n| e.aps.aps.iter().find(|a| a.name == n))
+        .or_else(|| e.aps.active());
+    if let Some(a) = active_ap {
+        ctx.ap = Some(a.clone());
     }
     let active_p = cred_override
         .as_deref()
@@ -666,6 +780,7 @@ fn resolve(
     root: &Path,
     engagement: Option<&str>,
     target_override: &Option<String>,
+    ap_override: &Option<String>,
     cred_override: &Option<String>,
     id: &str,
     extra_vars: &[String],
@@ -679,7 +794,13 @@ fn resolve(
         .flat_map(|c| c.commands.iter())
         .find(|c| c.id == id)
         .ok_or_else(|| anyhow!("command id '{}' not found", id))?;
-    let ctx = build_context(&e, target_override, cred_override, extra_vars);
+    let ctx = build_context(
+        &e,
+        target_override,
+        ap_override,
+        cred_override,
+        extra_vars,
+    );
     let tmpl = cmd.applicable_template(&|w| crate::render::condition::evaluate(w, &ctx));
     let result = render::render(tmpl, &ctx)?;
     Ok(result.resolved)
@@ -728,6 +849,7 @@ async fn run_with_history(
     use tokio::process::Command;
     let mut e = open_engagement(root, engagement)?;
     let target = e.targets.active().map(|t| t.name.clone());
+    let ap = e.aps.active().map(|a| a.name.clone());
     let profile = e.profiles.active().map(|p| p.name.clone());
     let started_at = Utc::now();
     let job_id = format!("{}", uuid::Uuid::new_v4());
@@ -748,6 +870,7 @@ async fn run_with_history(
         resolved: resolved.to_string(),
         target,
         profile,
+        ap,
         started_at,
         finished_at: Some(Utc::now()),
         status: if status.success() {
