@@ -148,6 +148,58 @@ mod tests {
         }
     }
 
+    /// Chronosphere templates escape awk/sed braces as `{{` / `}}`; expand for shell checks.
+    fn expand_template_literals(template: &str) -> String {
+        template.replace("{{", "{").replace("}}", "}")
+    }
+
+    #[test]
+    fn templates_avoid_broken_cut_backslash_delimiter() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("commands");
+        let lib = CommandLibrary::load(&[dir.as_path()]).expect("load library");
+        let mut bad = Vec::new();
+        for cat in &lib.categories {
+            for cmd in &cat.commands {
+                let t = expand_template_literals(&cmd.template);
+                for v in &cmd.variants {
+                    let vt = expand_template_literals(&v.template);
+                    if vt.contains("cut -d'\\") || vt.contains("cut -d\"\\") {
+                        bad.push(format!("{} (variant)", cmd.id));
+                    }
+                }
+                if t.contains("cut -d'\\") || t.contains("cut -d\"\\") {
+                    bad.push(cmd.id.clone());
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "cut -d'\\' breaks on macOS/BSD (use awk gsub or cut -d$'\\134'): {:#?}",
+            bad
+        );
+    }
+
+    #[test]
+    fn smb_harvest_parsers_extract_usernames() {
+        let script = r#"
+set -e
+out=$(printf '%s\n' 'user:[administrator] rid:(0x1f4)' | grep 'user:' | sed -n 's/user:\[\([^]]*\)\].*/\1/p' | sort -u)
+test "$out" = "administrator"
+
+out=$(printf '%s\n' 'SMB 10.0.0.1 445 CORP [+] CORP\alice' | awk '/\\/ {u=$NF; gsub(/^.*\\/, "", u); print u}')
+test "$out" = "alice"
+
+out=$(printf '%s\n' 'SMB 10.0.0.1 445 CORP 500 CORP\bob (SidTypeUser)' | awk '/SidTypeUser/ {u=$(NF-1); gsub(/^.*\\/, "", u); print u}')
+test "$out" = "bob"
+"#;
+        let status = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(script)
+            .status()
+            .expect("run bash");
+        assert!(status.success(), "smb harvest parser regression script failed");
+    }
+
     fn extract_helper_names(template: &str) -> Vec<String> {
         let mut names = Vec::new();
         let mut rest = template;

