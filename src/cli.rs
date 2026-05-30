@@ -54,10 +54,18 @@ pub enum Command {
     List(ListArgs),
 
     /// Show a command (resolved with current target/creds).
-    Show { id: String },
+    Show {
+        id: String,
+        #[arg(short = 'v', long = "var", value_name = "KEY=VALUE")]
+        vars: Vec<String>,
+    },
 
     /// Print the resolved command (shell-safe, single line).
-    Render { id: String },
+    Render {
+        id: String,
+        #[arg(short = 'v', long = "var", value_name = "KEY=VALUE")]
+        vars: Vec<String>,
+    },
 
     /// Render and copy a command to the clipboard.
     Yank {
@@ -88,6 +96,10 @@ pub enum Command {
     /// Credential CRUD.
     #[command(subcommand)]
     Creds(CredsCmd),
+
+    /// Template variable placeholders for the active engagement.
+    #[command(subcommand)]
+    Variables(VariableCmd),
 
     /// Check installed tools referenced by the library.
     Doctor {
@@ -208,6 +220,23 @@ pub enum CredsCmd {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum VariableCmd {
+    /// List template variables (library placeholders + engagement overrides).
+    List {
+        /// Only show variables with no value set.
+        #[arg(long)]
+        unset_only: bool,
+    },
+    Set {
+        name: String,
+        value: String,
+    },
+    Unset {
+        name: String,
+    },
+}
+
 /// Returns true if dispatching consumed the run (CLI mode); false to fall through to TUI.
 pub async fn dispatch(cli: Cli) -> Result<bool> {
     let cmd = match cli.command {
@@ -297,6 +326,27 @@ alias chronosphere='{bin}'
             let dir = config::user_commands_dir();
             let n = crate::builtin::extract_to(&dir, force)?;
             println!("extracted {} template files -> {}", n, dir.display());
+            Ok(true)
+        }
+        Command::Variables(c) => {
+            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            let sources = library_sources(&root, Some(&e.meta.name))?;
+            let lib = load_library(&sources)?;
+            match c {
+                VariableCmd::List { unset_only } => {
+                    print_variables(&e, &lib, unset_only);
+                }
+                VariableCmd::Set { name, value } => {
+                    e.variables.set(name.clone(), value);
+                    e.save_variables()?;
+                    println!("set {}", name);
+                }
+                VariableCmd::Unset { name } => {
+                    e.variables.remove(&name);
+                    e.save_variables()?;
+                    println!("unset {}", name);
+                }
+            }
             Ok(true)
         }
         Command::Doctor { missing } => {
@@ -394,8 +444,15 @@ alias chronosphere='{bin}'
             }
             Ok(true)
         }
-        Command::Show { id } | Command::Render { id } => {
-            let resolved = resolve(&root, cli.engagement.as_deref(), &cli.target, &cli.creds, &id, &[])?;
+        Command::Show { id, vars } | Command::Render { id, vars } => {
+            let resolved = resolve(
+                &root,
+                cli.engagement.as_deref(),
+                &cli.target,
+                &cli.creds,
+                &id,
+                &vars,
+            )?;
             println!("{}", resolved);
             Ok(true)
         }
@@ -403,7 +460,14 @@ alias chronosphere='{bin}'
             let text = if raw {
                 raw_template(&root, cli.engagement.as_deref(), &id)?
             } else {
-                resolve(&root, cli.engagement.as_deref(), &cli.target, &cli.creds, &id, &[])?
+                resolve(
+                    &root,
+                    cli.engagement.as_deref(),
+                    &cli.target,
+                    &cli.creds,
+                    &id,
+                    &[],
+                )?
             };
             let r = crate::clipboard::copy_report(&text)?;
             println!("{}", crate::clipboard::format_yank_message(&r));
@@ -589,6 +653,7 @@ fn build_context(
     if let Some(p) = active_p {
         ctx.profile = Some(p.clone());
     }
+    ctx.globals = e.variables.values.clone();
     for kv in extra_vars {
         if let Some((k, v)) = kv.split_once('=') {
             ctx.globals.insert(k.trim().to_string(), v.to_string());
@@ -618,6 +683,28 @@ fn resolve(
     let tmpl = cmd.applicable_template(&|w| crate::render::condition::evaluate(w, &ctx));
     let result = render::render(tmpl, &ctx)?;
     Ok(result.resolved)
+}
+
+fn print_variables(e: &Engagement, lib: &CommandLibrary, unset_only: bool) {
+    use crate::render::placeholders::collect_library_custom_placeholders;
+    use std::collections::BTreeSet;
+
+    let library = collect_library_custom_placeholders(lib);
+    let mut names: BTreeSet<String> = library.clone();
+    for k in e.variables.values.keys() {
+        names.insert(k.clone());
+    }
+    for name in names {
+        let value = e.variables.values.get(&name);
+        let is_set = value.is_some_and(|v| !v.is_empty());
+        if unset_only && is_set {
+            continue;
+        }
+        let status = if is_set { "set" } else { "unset" };
+        let val = value.filter(|v| !v.is_empty()).map(|s| s.as_str()).unwrap_or("-");
+        let tag = if library.contains(&name) { "" } else { " (custom)" };
+        println!("{:<8}  {:<20}  {}{}", status, name, val, tag);
+    }
 }
 
 fn raw_template(root: &Path, engagement: Option<&str>, id: &str) -> Result<String> {

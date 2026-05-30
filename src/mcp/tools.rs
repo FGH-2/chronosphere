@@ -70,6 +70,7 @@ impl State {
             if let Some(p) = p {
                 ctx.profile = Some(p.clone());
             }
+            ctx.globals = e.variables.values.clone();
         }
         for (k, v) in extra_vars {
             if let Some(s) = v.as_str() {
@@ -399,6 +400,8 @@ async fn tool_engagement_info(state: Arc<Mutex<State>>) -> Result<Value> {
             })),
             "target_count": e.targets.targets.len(),
             "creds_count": e.profiles.profiles.len(),
+            "variables_set": e.variables.values.values().filter(|v| !v.is_empty()).count(),
+            "variables_total": e.variables.values.len(),
             "recent_jobs": e.history.recent.len(),
         }),
         None => json!({"engagement": null, "engagements_available": Engagement::list(&s.root)}),

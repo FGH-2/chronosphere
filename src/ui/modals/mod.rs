@@ -6,3 +6,4 @@ pub mod job_log;
 pub mod search;
 pub mod target;
 pub mod tools;
+pub mod variables;

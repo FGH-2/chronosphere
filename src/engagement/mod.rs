@@ -1,10 +1,12 @@
 pub mod creds;
 pub mod history;
 pub mod target;
+pub mod variables;
 
 pub use creds::{CredKind, CredentialProfile, ProfileStore};
 pub use history::{HistoryStore, JobRecord, JobStatus};
 pub use target::{Target, TargetStore};
+pub use variables::VariableStore;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -25,6 +27,7 @@ pub struct Engagement {
     pub dir: PathBuf,
     pub targets: TargetStore,
     pub profiles: ProfileStore,
+    pub variables: VariableStore,
     pub history: HistoryStore,
 }
 
@@ -37,6 +40,9 @@ impl Engagement {
     }
     pub fn creds_path(dir: &Path) -> PathBuf {
         dir.join("creds.json")
+    }
+    pub fn variables_path(dir: &Path) -> PathBuf {
+        dir.join("variables.json")
     }
     pub fn history_path(dir: &Path) -> PathBuf {
         dir.join("jobs.jsonl")
@@ -77,6 +83,8 @@ impl Engagement {
         targets.save(&Self::targets_path(&dir))?;
         let profiles = ProfileStore::new();
         profiles.save(&Self::creds_path(&dir))?;
+        let variables = VariableStore::new();
+        variables.save(&Self::variables_path(&dir))?;
 
         let history = HistoryStore::open(&Self::history_path(&dir))?;
         Ok(Self {
@@ -84,6 +92,7 @@ impl Engagement {
             dir,
             targets,
             profiles,
+            variables,
             history,
         })
     }
@@ -102,6 +111,10 @@ impl Engagement {
             tracing::warn!(?err, "could not load creds.json; starting fresh");
             ProfileStore::new()
         });
+        let variables = VariableStore::load(&Self::variables_path(&dir)).unwrap_or_else(|err| {
+            tracing::warn!(?err, "could not load variables.json; starting fresh");
+            VariableStore::new()
+        });
         let history = HistoryStore::open(&Self::history_path(&dir))?;
         fs::create_dir_all(Self::jobs_dir(&dir)).ok();
         fs::create_dir_all(Self::overrides_dir(&dir)).ok();
@@ -110,6 +123,7 @@ impl Engagement {
             dir,
             targets,
             profiles,
+            variables,
             history,
         })
     }
@@ -142,5 +156,8 @@ impl Engagement {
     }
     pub fn save_profiles(&self) -> Result<()> {
         self.profiles.save(&Self::creds_path(&self.dir))
+    }
+    pub fn save_variables(&self) -> Result<()> {
+        self.variables.save(&Self::variables_path(&self.dir))
     }
 }

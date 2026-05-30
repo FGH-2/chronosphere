@@ -192,6 +192,57 @@ impl CredEditField {
 }
 
 #[derive(Default)]
+pub struct VariablesModal {
+    pub state: VariablesModalState,
+}
+
+#[derive(Debug, Clone)]
+pub enum VariablesModalState {
+    List {
+        cursor: usize,
+        unset_only: bool,
+    },
+    Edit {
+        name: String,
+        value: String,
+        focused: usize,
+        name_editable: bool,
+    },
+}
+
+impl Default for VariablesModalState {
+    fn default() -> Self {
+        VariablesModalState::List {
+            cursor: 0,
+            unset_only: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VariableRow {
+    pub name: String,
+    pub value: Option<String>,
+    pub in_library: bool,
+    pub needed_by_current: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariableEditField {
+    Name,
+    Value,
+}
+
+impl VariableEditField {
+    pub fn label(self) -> &'static str {
+        match self {
+            VariableEditField::Name => "name",
+            VariableEditField::Value => "value",
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct ToolsModal;
 
 pub struct JobLogModal {
@@ -236,6 +287,7 @@ pub enum Modal {
     Engagement(EngagementModal),
     Target(TargetModal),
     Creds(CredsModal),
+    Variables(VariablesModal),
     Tools(ToolsModal),
     Search {
         matches: Vec<SearchHit>,
@@ -643,6 +695,9 @@ impl App {
             "engagement" | "eng" => self.open_engagement_modal(rest.as_slice()),
             "target" | "t" => self.open_target_modal(rest.as_slice()),
             "creds" | "c" => self.open_creds_modal(rest.as_slice()),
+            "variable" | "variables" | "var" | "vars" | "v" => {
+                self.open_variables_modal(rest.as_slice())
+            }
             "tools" => self.modal = Modal::Tools(ToolsModal),
             "reload" => self.reload_library(),
             "splash" | "dashboard" => {
@@ -944,6 +999,7 @@ impl App {
             Modal::Engagement(_) => self.handle_engagement_modal(ke),
             Modal::Target(_) => self.handle_target_modal(ke),
             Modal::Creds(_) => self.handle_creds_modal(ke),
+            Modal::Variables(_) => self.handle_variables_modal(ke),
             _ => {}
         }
     }
@@ -1236,6 +1292,194 @@ impl App {
                 }
             },
         }
+    }
+
+    fn open_variables_modal(&mut self, rest: &[&str]) {
+        if self.engagement.is_none() {
+            self.flash_error("create or switch to an engagement first (:engagement new <name>)".into());
+            return;
+        }
+        if let Some(spec) = rest.first() {
+            if let Some((name, value)) = spec.split_once('=') {
+                if let Some(eng) = self.engagement.as_mut() {
+                    eng.variables.set(name.trim().to_string(), value.to_string());
+                    let _ = eng.save_variables();
+                    self.flash_ok(format!("{}={}", name.trim(), value));
+                }
+                return;
+            }
+            self.flash_error(format!(
+                "usage: :variable name=value  or  :variable  (open editor)"
+            ));
+            return;
+        }
+        self.modal = Modal::Variables(VariablesModal::default());
+    }
+
+    fn handle_variables_modal(&mut self, ke: KeyEvent) {
+        let mut state = match &self.modal {
+            Modal::Variables(m) => m.state.clone(),
+            _ => return,
+        };
+        match &mut state {
+            VariablesModalState::List {
+                cursor,
+                unset_only,
+            } => {
+                let rows = self.variable_rows(*unset_only);
+                let len = rows.len();
+                match ke.code {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if len > 0 && *cursor + 1 < len {
+                            *cursor += 1;
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if *cursor > 0 {
+                            *cursor -= 1;
+                        }
+                    }
+                    KeyCode::Char('u') => {
+                        *unset_only = !*unset_only;
+                        *cursor = 0;
+                    }
+                    KeyCode::Char('a') => {
+                        state = VariablesModalState::Edit {
+                            name: String::new(),
+                            value: String::new(),
+                            focused: 0,
+                            name_editable: true,
+                        };
+                    }
+                    KeyCode::Char('e') | KeyCode::Enter => {
+                        if let Some(row) = rows.get(*cursor) {
+                            state = VariablesModalState::Edit {
+                                name: row.name.clone(),
+                                value: row.value.clone().unwrap_or_default(),
+                                focused: if ke.code == KeyCode::Enter
+                                    && row.value.as_ref().is_some_and(|v| !v.is_empty())
+                                {
+                                    1
+                                } else {
+                                    0
+                                },
+                                name_editable: false,
+                            };
+                        }
+                    }
+                    KeyCode::Char('d') => {
+                        if let Some(row) = rows.get(*cursor) {
+                            if let Some(eng) = self.engagement.as_mut() {
+                                eng.variables.remove(&row.name);
+                                let _ = eng.save_variables();
+                                if *cursor > 0 && *cursor >= len.saturating_sub(1) {
+                                    *cursor -= 1;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            VariablesModalState::Edit {
+                name,
+                value,
+                focused,
+                name_editable,
+            } => {
+                let field_count = 2;
+                match ke.code {
+                    KeyCode::Tab if *focused == 1 => {
+                        self.complete_variable_value_path(value);
+                    }
+                    KeyCode::Tab | KeyCode::Down => {
+                        *focused = (*focused + 1) % field_count;
+                    }
+                    KeyCode::BackTab | KeyCode::Up => {
+                        *focused = if *focused == 0 {
+                            field_count - 1
+                        } else {
+                            *focused - 1
+                        }
+                    }
+                    KeyCode::Esc => {
+                        state = VariablesModalState::List {
+                            cursor: 0,
+                            unset_only: false,
+                        };
+                    }
+                    KeyCode::Enter => {
+                        let key = name.trim();
+                        if key.is_empty() {
+                            self.flash_error("variable name cannot be empty".into());
+                            return;
+                        }
+                        if !key
+                            .chars()
+                            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                        {
+                            self.flash_error(
+                                "name must be alphanumeric/underscore (placeholder id)".into(),
+                            );
+                            return;
+                        }
+                        if let Some(eng) = self.engagement.as_mut() {
+                            eng.variables.set(key.to_string(), value.trim().to_string());
+                            let _ = eng.save_variables();
+                        }
+                        state = VariablesModalState::List {
+                            cursor: 0,
+                            unset_only: false,
+                        };
+                    }
+                    _ => {
+                        let buf = match *focused {
+                            0 if *name_editable => Some(name),
+                            1 => Some(value),
+                            _ => None,
+                        };
+                        if let Some(buf) = buf {
+                            apply_to_string(buf, text_edit_action(&ke));
+                        }
+                    }
+                }
+            }
+        }
+        if let Modal::Variables(m) = &mut self.modal {
+            m.state = state;
+        }
+    }
+
+    fn complete_variable_value_path(&mut self, value: &mut String) {
+        let roots = self.edit_completion_roots();
+        let line = value.as_str();
+        let col = line.len();
+        let Some(token) = crate::path_complete::token_at_cursor(line, col) else {
+            return;
+        };
+        if !crate::path_complete::looks_like_path(&token.text, line, token.start) {
+            return;
+        }
+        let candidates = crate::path_complete::completions(&token.text, &roots);
+        if candidates.is_empty() {
+            return;
+        }
+        let choice = if candidates.len() == 1 {
+            candidates[0].clone()
+        } else {
+            let lcp = crate::path_complete::longest_common_prefix(&candidates);
+            if lcp.len() > token.text.len() {
+                lcp
+            } else {
+                candidates[0].clone()
+            }
+        };
+        *value = format!(
+            "{}{}{}",
+            &line[..token.start],
+            choice,
+            &line[token.end..]
+        );
     }
 
     // creds modal
@@ -1931,8 +2175,70 @@ impl App {
         if let Some(eng) = &self.engagement {
             ctx.target = eng.active_target().cloned();
             ctx.profile = eng.active_profile().cloned();
+            ctx.globals = eng.variables.values.clone();
         }
         ctx
+    }
+
+    /// Rows for the variables modal: union of library placeholders and stored keys.
+    pub fn variable_rows(&self, unset_only: bool) -> Vec<VariableRow> {
+        use crate::render::placeholders::collect_library_custom_placeholders;
+        use std::collections::BTreeSet;
+
+        let needed: BTreeSet<String> = self
+            .current_command_unresolved_vars()
+            .into_iter()
+            .collect();
+        let library = collect_library_custom_placeholders(&self.library);
+        let mut names: BTreeSet<String> = library.clone();
+        if let Some(eng) = &self.engagement {
+            for k in eng.variables.values.keys() {
+                names.insert(k.clone());
+            }
+        }
+
+        let mut rows: Vec<VariableRow> = names
+            .into_iter()
+            .map(|name| {
+                let value = self
+                    .engagement
+                    .as_ref()
+                    .and_then(|e| e.variables.values.get(&name).cloned());
+                VariableRow {
+                    in_library: library.contains(&name),
+                    needed_by_current: needed.contains(&name),
+                    name,
+                    value,
+                }
+            })
+            .collect();
+        rows.sort_by(|a, b| a.name.cmp(&b.name));
+        if unset_only {
+            rows.retain(|r| r.value.as_ref().is_none_or(|v| v.is_empty()));
+        }
+        rows
+    }
+
+    pub fn variable_counts(&self) -> (usize, usize) {
+        let rows = self.variable_rows(false);
+        let set = rows
+            .iter()
+            .filter(|r| r.value.as_ref().is_some_and(|v| !v.is_empty()))
+            .count();
+        (set, rows.len().saturating_sub(set))
+    }
+
+    pub fn current_command_unresolved_vars(&self) -> Vec<String> {
+        let cmd = match self.current_command() {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        let ctx = self.render_context();
+        let tmpl = cmd.applicable_template(&|w: &str| crate::render::condition::evaluate(w, &ctx));
+        match crate::render::render(tmpl, &ctx) {
+            Ok(r) => r.unresolved,
+            Err(_) => Vec::new(),
+        }
     }
 
     pub fn multi_selected_contains(&self, cmd_id: &str) -> bool {

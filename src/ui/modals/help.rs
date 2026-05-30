@@ -35,6 +35,8 @@ const HELP: &[(&str, &str)] = &[
     (":engagement", "list/switch/new engagement"),
     (":target", "list/edit/switch active target"),
     (":creds", "list/edit/switch active credential profile"),
+    (":variable", "template vars (wordlist, bssid, …) — set/unset for engagement"),
+    (":variable name=value", "quick-set one variable from the command palette"),
     (":tools", "show which referenced tools are on $PATH"),
     (":reload", "force-reload command library from disk"),
     (":write", "save inline-edited command as new id in engagement overrides"),

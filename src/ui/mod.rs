@@ -52,6 +52,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Modal::Engagement(_) => modals::engagement::render(f, area, app),
         Modal::Target(_) => modals::target::render(f, area, app),
         Modal::Creds(_) => modals::creds::render(f, area, app),
+        Modal::Variables(_) => modals::variables::render(f, area, app),
         Modal::Tools(_) => modals::tools::render(f, area, app),
         Modal::Search { .. } => modals::search::render(f, area, app),
         Modal::Edit(_) => modals::edit::render(f, area, app),

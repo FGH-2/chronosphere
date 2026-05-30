@@ -3,7 +3,7 @@ display_name = "WiFi / 802.11"
 icon = "󰤨"
 order = 12
 
-# Placeholders (set via TUI edit or `chronosphere run … -v key=val`):
+# Placeholders (set via `:variable` / `chronosphere variables`, or `run … -v key=val`):
 #   iface=wlan0  mon_iface=wlan0mon  bssid=AA:BB:CC:DD:EE:FF  station=CLIENT_MAC
 #   channel=6  ssid=TargetNet  capture=captures/target  wordlist=/usr/share/wordlists/rockyou.txt
 #   hcap=handshake.hc22000  cap=handshake.cap  sae_hash=sae.22000

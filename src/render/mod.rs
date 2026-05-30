@@ -1,6 +1,7 @@
 pub mod condition;
 pub mod context;
 pub mod helpers;
+pub mod placeholders;
 
 pub use context::RenderContext;
 
