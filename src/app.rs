@@ -384,6 +384,16 @@ impl VariableEditField {
 pub struct ToolsModal;
 
 #[derive(Default)]
+pub struct CveModal {
+    pub query: String,
+    pub results: Vec<crate::cve::CveRecord>,
+    pub cursor: usize,
+    pub detail: bool,
+    pub kev_only: bool,
+    pub syncing: bool,
+}
+
+#[derive(Default)]
 pub struct HelpModal {
     pub scroll: usize,
     /// Last render viewport height (lines), used to clamp scroll in the key handler.
@@ -442,6 +452,7 @@ pub enum Modal {
     },
     Edit(EditModal),
     JobLog(JobLogModal),
+    Cve(CveModal),
 }
 
 pub struct App {
@@ -478,6 +489,7 @@ pub struct App {
     pub _watcher: Option<notify::RecommendedWatcher>,
     pub library_reload_pending: bool,
     pub library_reload_rx: Option<tokio::sync::mpsc::UnboundedReceiver<()>>,
+    pub cve_sync_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Result<crate::cve::SyncResult>>>,
     /// Engagement directory root (`--root` or default XDG path).
     engagements_root: PathBuf,
 }
@@ -523,6 +535,7 @@ impl App {
             _watcher: None,
             library_reload_pending: false,
             library_reload_rx: None,
+            cve_sync_rx: None,
             needs_full_redraw: false,
             engagements_root,
         };
@@ -614,6 +627,30 @@ impl App {
                     self.library_reload_pending = true;
                 }
             }
+            if let Some(rx) = self.cve_sync_rx.as_mut() {
+                if let Ok(result) = rx.try_recv() {
+                    self.cve_sync_rx = None;
+                    match result {
+                        Ok(r) => {
+                            self.flash_ok(format!(
+                                "CVE sync: {} added, {} updated",
+                                r.added, r.updated
+                            ));
+                            if let Modal::Cve(m) = &mut self.modal {
+                                m.syncing = false;
+                                m.results = Self::load_cve_results(&m.query, m.kev_only);
+                                m.cursor = 0;
+                            }
+                        }
+                        Err(e) => {
+                            self.flash_error(format!("CVE sync failed: {e:#}"));
+                            if let Modal::Cve(m) = &mut self.modal {
+                                m.syncing = false;
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(flash) = &self.flash {
                 if flash.at.elapsed() > Duration::from_secs(4) {
                     self.flash = None;
@@ -685,6 +722,10 @@ impl App {
     fn handle_normal_mode_key(&mut self, ke: KeyEvent) {
         if matches!(self.modal, Modal::JobLog(_)) {
             self.handle_job_log_modal_key(ke);
+            return;
+        }
+        if matches!(self.modal, Modal::Cve(_)) {
+            self.handle_cve_modal_key(ke);
             return;
         }
         if matches!(self.modal, Modal::Help(_)) {
@@ -872,6 +913,7 @@ impl App {
                 self.open_variables_modal(rest.as_slice())
             }
             "tools" => self.modal = Modal::Tools(ToolsModal),
+            "cve" => self.open_cve_modal(),
             "reload" => self.reload_library(),
             "splash" | "dashboard" => {
                 self.splash = Some(SplashState::new());
@@ -2641,6 +2683,170 @@ impl App {
             _ => {}
         }
         ui::modals::help::clamp_scroll(modal, vis);
+    }
+
+    fn open_cve_modal(&mut self) {
+        let results = Self::load_cve_results("", false);
+        self.modal = Modal::Cve(CveModal {
+            results,
+            ..Default::default()
+        });
+    }
+
+    fn load_cve_results(query: &str, kev_only: bool) -> Vec<crate::cve::CveRecord> {
+        use crate::cve::{CveFilter, search};
+        let q = query.trim();
+        if !q.is_empty() {
+            return search(CveFilter {
+                query: Some(q.to_string()),
+                kev_only,
+                limit: 100,
+                ..Default::default()
+            })
+            .unwrap_or_default();
+        }
+        if kev_only {
+            return search(CveFilter {
+                kev_only: true,
+                limit: 50,
+                ..Default::default()
+            })
+            .unwrap_or_default();
+        }
+        let kev = search(CveFilter {
+            kev_only: true,
+            limit: 50,
+            ..Default::default()
+        })
+        .unwrap_or_default();
+        if !kev.is_empty() {
+            return kev;
+        }
+        search(CveFilter {
+            severity: Some("CRITICAL".into()),
+            since_days: Some(90),
+            limit: 50,
+            ..Default::default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn refresh_cve_modal_results(&mut self) {
+        if let Modal::Cve(m) = &mut self.modal {
+            let q = m.query.clone();
+            let kev = m.kev_only;
+            m.results = Self::load_cve_results(&q, kev);
+            if m.cursor >= m.results.len() {
+                m.cursor = m.results.len().saturating_sub(1);
+            }
+        }
+    }
+
+    fn start_cve_sync(&mut self) {
+        if self.cve_sync_rx.is_some() {
+            return;
+        }
+        if let Modal::Cve(m) = &mut self.modal {
+            if m.syncing {
+                return;
+            }
+            m.syncing = true;
+        }
+        let cfg = crate::cve::config::CveConfig::load();
+        let opts = crate::cve::SyncOptions {
+            years: cfg.sync.default_years.clone(),
+            enrich_osv: true,
+            enrich_epss: cfg.epss.enabled,
+            ..Default::default()
+        };
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.cve_sync_rx = Some(rx);
+        tokio::spawn(async move {
+            let result = crate::cve::sync(opts).await;
+            let _ = tx.send(result);
+        });
+    }
+
+    fn handle_cve_modal_key(&mut self, ke: KeyEvent) {
+        if let Modal::Cve(m) = &self.modal {
+            if m.syncing {
+                if matches!(ke.code, KeyCode::Esc) {
+                    self.modal = Modal::None;
+                }
+                return;
+            }
+        }
+
+        if let Modal::Cve(m) = &mut self.modal {
+            if m.detail {
+                match ke.code {
+                    KeyCode::Esc => m.detail = false,
+                    KeyCode::Char('y') => {
+                        if let Some(rec) = m.results.get(m.cursor) {
+                            let id = rec.id.clone();
+                            match crate::clipboard::copy(&id) {
+                                Ok(()) => self.flash_ok(format!("yanked {id}")),
+                                Err(e) => self.flash_error(format!("clipboard: {e}")),
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+        }
+
+        match ke.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.modal = Modal::None;
+                self.needs_full_redraw = true;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Modal::Cve(m) = &mut self.modal {
+                    if m.cursor + 1 < m.results.len() {
+                        m.cursor += 1;
+                    }
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Modal::Cve(m) = &mut self.modal {
+                    m.cursor = m.cursor.saturating_sub(1);
+                }
+            }
+            KeyCode::Enter => {
+                if let Modal::Cve(m) = &mut self.modal {
+                    if !m.results.is_empty() {
+                        m.detail = true;
+                    }
+                }
+            }
+            KeyCode::Char('y') => {
+                if let Modal::Cve(m) = &self.modal {
+                    if let Some(rec) = m.results.get(m.cursor) {
+                        match crate::clipboard::copy(&rec.id) {
+                            Ok(()) => self.flash_ok(format!("yanked {}", rec.id)),
+                            Err(e) => self.flash_error(format!("clipboard: {e}")),
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('s') => self.start_cve_sync(),
+            KeyCode::Char('K') => {
+                if let Modal::Cve(m) = &mut self.modal {
+                    m.kev_only = !m.kev_only;
+                    self.refresh_cve_modal_results();
+                }
+            }
+            _ => {
+                let action = text_edit_action(&ke);
+                if !matches!(action, TextEditAction::None) {
+                    if let Modal::Cve(m) = &mut self.modal {
+                        apply_to_string(&mut m.query, action);
+                        self.refresh_cve_modal_results();
+                    }
+                }
+            }
+        }
     }
 
     fn selected_job_record(&self) -> Option<&JobRecord> {

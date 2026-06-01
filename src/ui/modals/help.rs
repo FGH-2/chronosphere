@@ -43,6 +43,7 @@ const HELP: &[(&str, &str)] = &[
     (":variable name=value", "quick-set one variable from the command palette"),
     (":tools", "show which referenced tools are on $PATH"),
     (":reload", "force-reload command library from disk"),
+    (":cve", "browse/search local CVE index (s sync, K KEV filter)"),
     (":write", "save inline-edited command as new id in engagement overrides"),
 ];
 

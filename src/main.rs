@@ -3,6 +3,7 @@ mod builtin;
 mod cli;
 mod clipboard;
 mod config;
+mod cve;
 mod deploy;
 mod engagement;
 mod exec;

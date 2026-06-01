@@ -100,7 +100,58 @@ template = "grep -ril 'CVE-2024' /opt/cve-trickest /opt/cve-poc-github 2>/dev/nu
 requires = ["grep"]
 tags = ["cve", "search"]
 
-# === NVD feed ===
+# === chronosphere local CVE index ===
+
+[[command]]
+id = "cve.chrono.sync"
+title = "chronosphere — sync local CVE index (incremental)"
+template = "chronosphere cve sync"
+requires = ["chronosphere"]
+tags = ["cve", "sync", "nvd"]
+
+[[command]]
+id = "cve.chrono.sync.month"
+title = "chronosphere — sync one month via NVD API"
+template = "chronosphere cve sync --month 2026-05"
+requires = ["chronosphere"]
+tags = ["cve", "sync", "nvd"]
+
+[[command]]
+id = "cve.chrono.sync.full"
+title = "chronosphere — full CVE sync (2024-2026)"
+template = "chronosphere cve sync --full --years 2024-2026"
+requires = ["chronosphere"]
+tags = ["cve", "sync", "nvd"]
+
+[[command]]
+id = "cve.chrono.search"
+title = "chronosphere — search local CVE index"
+template = "chronosphere cve search nginx rce --limit 20"
+requires = ["chronosphere"]
+tags = ["cve", "search"]
+
+[[command]]
+id = "cve.chrono.search.kev"
+title = "chronosphere — list KEV entries locally"
+template = "chronosphere cve search --kev --limit 30"
+requires = ["chronosphere"]
+tags = ["cve", "search", "kev"]
+
+[[command]]
+id = "cve.chrono.status"
+title = "chronosphere — CVE database status"
+template = "chronosphere cve status"
+requires = ["chronosphere"]
+tags = ["cve", "status"]
+
+[[command]]
+id = "cve.chrono.fetch"
+title = "chronosphere — fetch single CVE on demand"
+template = "chronosphere cve fetch CVE-2026-9256 --enrich"
+requires = ["chronosphere"]
+tags = ["cve", "fetch"]
+
+# === NVD feed (legacy curl) ===
 
 [[command]]
 id = "cve.nvd.fetch_year"

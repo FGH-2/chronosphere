@@ -72,4 +72,20 @@ pub fn last_engagement_marker() -> PathBuf {
     data_dir().join("last_engagement")
 }
 
+pub fn cve_dir() -> PathBuf {
+    data_dir().join("cve")
+}
+
+pub fn cve_db_path() -> PathBuf {
+    cve_dir().join("cve.db")
+}
+
+pub fn cve_sync_state_path() -> PathBuf {
+    cve_dir().join("sync-state.json")
+}
+
+pub fn cve_config_path() -> PathBuf {
+    config_dir().join("cve.toml")
+}
+
 pub const TMUX_SESSION: &str = "chronosphere";

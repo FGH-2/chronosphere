@@ -1,4 +1,5 @@
 pub mod ap;
+pub mod cve;
 pub mod creds;
 pub mod edit;
 pub mod engagement;

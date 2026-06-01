@@ -155,6 +155,76 @@ pub enum Command {
 
     /// Ship the chronosphere binary to a remote host via scp (Pwnbox, lab box, etc).
     Deploy(crate::deploy::DeployArgs),
+
+    /// Local CVE index: sync, search, and browse vulnerability data.
+    #[command(subcommand)]
+    Cve(CveCmd),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CveCmd {
+    /// Sync CVE data from NVD feeds, CISA KEV, EPSS, and OSV.
+    Sync {
+        /// Import all year feeds (not just modified/recent). Mutually exclusive with `--month`.
+        #[arg(long, conflicts_with = "month")]
+        full: bool,
+        /// Year range or list (e.g. 2024-2026 or 2025,2026). Ignored when `--month` is set.
+        #[arg(long, conflicts_with = "month")]
+        years: Option<String>,
+        /// Sync one calendar month via NVD API (e.g. 2026-05). Smaller than `--full`.
+        #[arg(long, value_name = "YYYY-MM")]
+        month: Option<String>,
+        /// With `--month`, match on last-modified date instead of publish date.
+        #[arg(long)]
+        by_modified: bool,
+        /// Skip OSV enrichment.
+        #[arg(long)]
+        no_osv: bool,
+        /// Skip EPSS score merge.
+        #[arg(long)]
+        no_epss: bool,
+        /// Providers to sync (default: nvd,kev).
+        #[arg(long, value_delimiter = ',')]
+        provider: Vec<String>,
+    },
+    /// Fetch a single CVE on demand (NVD API + optional enrichment).
+    Fetch {
+        cve_id: String,
+        #[arg(long)]
+        enrich: bool,
+    },
+    /// Search the local CVE index.
+    Search {
+        query: Option<String>,
+        #[arg(long)]
+        product: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long)]
+        cwe: Option<String>,
+        #[arg(long)]
+        severity: Option<String>,
+        #[arg(long)]
+        kev: bool,
+        #[arg(long)]
+        min_epss: Option<f64>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one CVE record from the local index.
+    Show {
+        cve_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print CVE database status.
+    Status,
 }
 
 #[derive(Args, Debug)]
@@ -370,6 +440,7 @@ pub async fn dispatch(cli: Cli) -> Result<bool> {
             println!("engagements: {}", root.display());
             println!("builtins:    {}", config::builtin_commands_dir().display());
             println!("user lib:    {}", config::user_commands_dir().display());
+            println!("cve db:      {}", config::cve_db_path().display());
             Ok(true)
         }
         Command::PathInstall => {
@@ -866,6 +937,192 @@ alias chronosphere='{bin}'
                 }
             }
             Ok(true)
+        }
+        Command::Cve(c) => {
+            dispatch_cve(c).await?;
+            Ok(true)
+        }
+    }
+}
+
+async fn dispatch_cve(cmd: CveCmd) -> Result<()> {
+    use crate::cve::{CveFilter, SyncOptions, fetch_one, parse_month, parse_since_days, parse_years, search, show, status, sync};
+
+    match cmd {
+        CveCmd::Sync {
+            full,
+            years,
+            month,
+            by_modified,
+            no_osv,
+            no_epss,
+            provider,
+        } => {
+            if full && month.is_some() {
+                bail!("--full and --month are mutually exclusive");
+            }
+            let month = month
+                .map(|m| parse_month(&m, by_modified))
+                .transpose()?;
+            let years = years
+                .map(|y| parse_years(&y))
+                .transpose()?
+                .unwrap_or_default();
+            let opts = SyncOptions {
+                full,
+                years,
+                month,
+                providers: provider,
+                enrich_osv: !no_osv,
+                enrich_epss: !no_epss,
+            };
+            let result = sync(opts).await?;
+            println!(
+                "sync complete: {} added, {} updated",
+                result.added, result.updated
+            );
+            for err in &result.errors {
+                eprintln!("warning: {err}");
+            }
+        }
+        CveCmd::Fetch { cve_id, enrich } => {
+            match fetch_one(&cve_id, enrich).await? {
+                Some(rec) => print_cve_record(&rec, false),
+                None => bail!("CVE not found: {cve_id}"),
+            }
+        }
+        CveCmd::Search {
+            query,
+            product,
+            vendor,
+            cwe,
+            severity,
+            kev,
+            min_epss,
+            since,
+            tag,
+            limit,
+            json,
+        } => {
+            let since_days = since
+                .map(|s| parse_since_days(&s))
+                .transpose()?;
+            let filter = CveFilter {
+                query,
+                product,
+                vendor,
+                cwe,
+                severity,
+                kev_only: kev,
+                min_epss,
+                since_days,
+                tag,
+                limit,
+            };
+            let hits = search(filter)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&hits)?);
+            } else if hits.is_empty() {
+                println!("no matches");
+            } else {
+                for rec in &hits {
+                    print_cve_summary(rec);
+                }
+            }
+        }
+        CveCmd::Show { cve_id, json } => {
+            match show(&cve_id)? {
+                Some(rec) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&rec)?);
+                    } else {
+                        print_cve_record(&rec, true);
+                    }
+                }
+                None => bail!("CVE not in local index: {cve_id} (try: chronosphere cve fetch {cve_id})"),
+            }
+        }
+        CveCmd::Status => {
+            let st = status()?;
+            println!("database:  {}", st.db_path);
+            println!("total:     {}", st.total);
+            println!("kev:       {}", st.kev_count);
+            if let Some(t) = st.last_sync {
+                println!("last sync: {}", t);
+            }
+            if let Some(f) = st.last_nvd_feed {
+                println!("last feed: {}", f);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_cve_summary(rec: &crate::cve::CveRecord) {
+    let kev = if rec.in_kev { " [KEV]" } else { "" };
+    let sev = rec.severity.as_deref().unwrap_or("-");
+    let score = rec
+        .cvss_v31
+        .map(|s| format!("{s:.1}"))
+        .unwrap_or_else(|| "-".into());
+    let desc: String = rec.description.chars().take(80).collect();
+    println!(
+        "{:<18} {:>8} CVSS {}  {}{}",
+        rec.id, sev, score, desc, kev
+    );
+}
+
+fn print_cve_record(rec: &crate::cve::CveRecord, verbose: bool) {
+    println!("{}", rec.id);
+    if let Some(p) = &rec.published {
+        println!("  published: {p}");
+    }
+    if let Some(m) = &rec.modified {
+        println!("  modified:  {m}");
+    }
+    if let Some(s) = &rec.severity {
+        let cvss = rec
+            .cvss_v31
+            .map(|v| format!(" (CVSS {v:.1})"))
+            .unwrap_or_default();
+        println!("  severity:  {s}{cvss}");
+    }
+    if rec.in_kev {
+        println!(
+            "  KEV:       added {} due {}",
+            rec.kev_date_added.as_deref().unwrap_or("-"),
+            rec.kev_due_date.as_deref().unwrap_or("-"),
+        );
+    }
+    if let Some(e) = rec.epss_score {
+        println!(
+            "  EPSS:      {:.4} (percentile {:.1}%)",
+            e,
+            rec.epss_percentile.unwrap_or(0.0) * 100.0
+        );
+    }
+    if !rec.sources.is_empty() {
+        println!("  sources:   {}", rec.sources.iter().cloned().collect::<Vec<_>>().join(", "));
+    }
+    println!("  description:");
+    for line in rec.description.lines().take(8) {
+        println!("    {line}");
+    }
+    if verbose {
+        if !rec.products.is_empty() {
+            println!("  products:");
+            for p in rec.products.iter().take(10) {
+                println!("    {}/{}", p.vendor, p.product);
+            }
+        }
+        if !rec.cwes.is_empty() {
+            println!("  CWEs:      {}", rec.cwes.join(", "));
+        }
+        if !rec.references.is_empty() {
+            println!("  references:");
+            for r in rec.references.iter().take(8) {
+                println!("    {}", r.url);
+            }
         }
     }
 }
