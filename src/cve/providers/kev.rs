@@ -14,8 +14,11 @@ struct KevFeed {
 
 #[derive(Debug, Deserialize)]
 struct KevEntry {
+    #[serde(rename = "cveID")]
     cve_id: String,
+    #[serde(rename = "dateAdded")]
     date_added: String,
+    #[serde(rename = "dueDate")]
     due_date: Option<String>,
 }
 
@@ -41,4 +44,19 @@ pub async fn sync_kev(client: &HttpClient, store: &mut CveStore) -> Result<u64> 
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_kev_entry_camel_case() {
+        let json = r#"{"title":"KEV","vulnerabilities":[{"cveID":"CVE-2024-21182","dateAdded":"2026-06-01","dueDate":"2026-06-04"}]}"#;
+        let feed: KevFeed = serde_json::from_str(json).unwrap();
+        assert_eq!(feed.vulnerabilities.len(), 1);
+        assert_eq!(feed.vulnerabilities[0].cve_id, "CVE-2024-21182");
+        assert_eq!(feed.vulnerabilities[0].date_added, "2026-06-01");
+        assert_eq!(feed.vulnerabilities[0].due_date.as_deref(), Some("2026-06-04"));
+    }
 }

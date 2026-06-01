@@ -7,7 +7,7 @@ use std::io::BufRead;
 
 const EPSS_URL: &str = "https://epss.cyentia.com/epss_scores-current.csv.gz";
 
-pub async fn sync_epss(client: &HttpClient, store: &mut CveStore) -> Result<u64> {
+pub async fn sync_epss(client: &HttpClient, store: &mut CveStore, progress: bool) -> Result<u64> {
     let resp = client.get("epss", EPSS_URL).await?;
     let bytes = resp.bytes().await?;
     let decoder = GzDecoder::new(&bytes[..]);
@@ -17,6 +17,9 @@ pub async fn sync_epss(client: &HttpClient, store: &mut CveStore) -> Result<u64>
         let line = line.context("read epss line")?;
         if i == 0 || line.starts_with('#') {
             continue;
+        }
+        if progress && i > 0 && i % 50_000 == 0 {
+            eprintln!("cve sync: EPSS processing row {i}…");
         }
         let parts: Vec<&str> = line.split(',').collect();
         if parts.len() < 3 {

@@ -7,9 +7,16 @@ use crate::cve::store::CveStore;
 use anyhow::{Context, Result, bail};
 use chrono::{NaiveDate, Utc};
 
+fn sync_progress(options: &SyncOptions, msg: impl AsRef<str>) {
+    if options.progress {
+        eprintln!("{}", msg.as_ref());
+    }
+}
+
 pub async fn sync(options: SyncOptions) -> Result<SyncResult> {
     let _guard = acquire_sync_lock().await?;
     ensure_cve_dirs()?;
+    sync_progress(&options, "cve sync: starting…");
     let cfg = CveConfig::load();
     let client = HttpClient::new(&CveConfig::user_agent())?;
     client.register_provider("nvd", cfg.nvd_interval_ms()).await;
@@ -31,8 +38,10 @@ pub async fn sync(options: SyncOptions) -> Result<SyncResult> {
     };
 
     if providers.iter().any(|p| p == "nvd") {
+        sync_progress(&options, "cve sync: fetching from NVD…");
         match sync_nvd(&client, &mut store, &mut state, &options, &cfg).await {
             Ok((a, u)) => {
+                sync_progress(&options, &format!("cve sync: NVD done ({a} added, {u} updated)"));
                 result.added += a;
                 result.updated += u;
             }
@@ -41,8 +50,10 @@ pub async fn sync(options: SyncOptions) -> Result<SyncResult> {
     }
 
     if providers.iter().any(|p| p == "kev") {
+        sync_progress(&options, "cve sync: merging CISA KEV catalog…");
         match kev::sync_kev(&client, &mut store).await {
             Ok(n) => {
+                sync_progress(&options, &format!("cve sync: KEV done ({n} entries)"));
                 tracing::info!(kev = n, "merged KEV entries");
                 result.updated += n;
             }
@@ -51,8 +62,10 @@ pub async fn sync(options: SyncOptions) -> Result<SyncResult> {
     }
 
     if options.enrich_epss && cfg.epss.enabled {
-        match epss::sync_epss(&client, &mut store).await {
+        sync_progress(&options, "cve sync: downloading EPSS scores…");
+        match epss::sync_epss(&client, &mut store, options.progress).await {
             Ok(n) => {
+                sync_progress(&options, &format!("cve sync: EPSS done ({n} scores merged)"));
                 tracing::info!(epss = n, "updated EPSS scores");
                 result.updated += n;
             }
@@ -64,13 +77,20 @@ pub async fn sync(options: SyncOptions) -> Result<SyncResult> {
         let since = state.last_osv_enrich.clone();
         let ids = store.ids_for_osv_enrich(since.as_deref(), cfg.osv.max_enrich_per_sync)?;
         if !ids.is_empty() {
-            match osv::enrich_batch(&client, &mut store, &ids).await {
+            sync_progress(
+                &options,
+                &format!("cve sync: enriching {} CVEs via OSV…", ids.len()),
+            );
+            match osv::enrich_batch(&client, &mut store, &ids, options.progress).await {
                 Ok(n) => {
+                    sync_progress(&options, &format!("cve sync: OSV done ({n} enriched)"));
                     tracing::info!(osv = n, "OSV enriched");
                     result.updated += n;
                 }
                 Err(e) => result.errors.push(format!("osv: {e}")),
             }
+        } else {
+            sync_progress(&options, "cve sync: OSV skipped (no new CVEs to enrich)");
         }
         state.last_osv_enrich = Some(Utc::now().to_rfc3339());
     }
@@ -107,7 +127,14 @@ async fn sync_nvd(
 ) -> Result<(u64, u64)> {
     if let Some(ref month) = options.month {
         let api_key = CveConfig::nvd_api_key();
-        return nvd::sync_by_month(client, store, month, api_key.as_deref()).await;
+        return nvd::sync_by_month(
+            client,
+            store,
+            month,
+            api_key.as_deref(),
+            options.progress,
+        )
+        .await;
     }
 
     let mut added = 0u64;
@@ -121,12 +148,14 @@ async fn sync_nvd(
         };
         for year in years {
             let feed = nvd::feed_name_for_year(year);
+            sync_progress(options, &format!("cve sync: downloading feed {feed}…"));
             let (a, u) = nvd::download_and_import_feed(client, store, &feed, state).await?;
             added += a;
             updated += u;
         }
     } else {
         for feed in ["nvdcve-2.0-modified", "nvdcve-2.0-recent"] {
+            sync_progress(options, &format!("cve sync: downloading feed {feed}…"));
             let (a, u) = nvd::download_and_import_feed(client, store, feed, state).await?;
             added += a;
             updated += u;

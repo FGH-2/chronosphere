@@ -975,6 +975,7 @@ async fn dispatch_cve(cmd: CveCmd) -> Result<()> {
                 providers: provider,
                 enrich_osv: !no_osv,
                 enrich_epss: !no_epss,
+                progress: true,
             };
             let result = sync(opts).await?;
             println!(

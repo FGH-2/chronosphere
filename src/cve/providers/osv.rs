@@ -27,9 +27,14 @@ pub async fn enrich_batch(
     client: &HttpClient,
     store: &mut CveStore,
     ids: &[String],
+    progress: bool,
 ) -> Result<u64> {
     let mut ok = 0u64;
-    for id in ids {
+    let total = ids.len();
+    for (i, id) in ids.iter().enumerate() {
+        if progress && (i == 0 || (i + 1) % 25 == 0 || i + 1 == total) {
+            eprintln!("cve sync: OSV {}/{}…", i + 1, total);
+        }
         match enrich_cve(client, store, id).await {
             Ok(true) => ok += 1,
             Ok(false) => {}

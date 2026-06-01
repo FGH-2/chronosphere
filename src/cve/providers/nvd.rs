@@ -288,6 +288,7 @@ pub async fn sync_by_month(
     store: &mut CveStore,
     month: &MonthSync,
     api_key: Option<&str>,
+    progress: bool,
 ) -> Result<(u64, u64)> {
     let (start, end) = month_date_bounds(month.year, month.month)?;
     let label = format!("{:04}-{:02}", month.year, month.month);
@@ -302,6 +303,18 @@ pub async fn sync_by_month(
     let mut total_results = 0u64;
 
     loop {
+        let page = start_index / RESULTS_PER_PAGE + 1;
+        let pages = total_results.div_ceil(u64::from(RESULTS_PER_PAGE)).max(1);
+        if progress {
+            if start_index == 0 {
+                eprintln!("cve sync: NVD {label} ({field}): waiting for first page…");
+            } else {
+                eprintln!(
+                    "cve sync: NVD {label} ({field}): page {page}/{pages} — {} CVEs imported so far",
+                    added + updated
+                );
+            }
+        }
         let url = build_month_api_url(&start, &end, by_modified, start_index, RESULTS_PER_PAGE);
         let resp = if let Some(key) = api_key {
             client.get_with_api_key("nvd", &url, key).await?
@@ -313,6 +326,11 @@ pub async fn sync_by_month(
         if start_index == 0 {
             total_results = root.get("totalResults").and_then(|v| v.as_u64()).unwrap_or(0);
             tracing::info!(total = total_results, "NVD CVE count for month range");
+            if progress {
+                eprintln!(
+                    "cve sync: NVD {label} ({field}): {total_results} CVEs reported by NVD"
+                );
+            }
         }
         let (a, u) = import_nvd_json_stats(store, &text)?;
         added += a;

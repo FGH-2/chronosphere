@@ -86,6 +86,8 @@ pub struct SyncOptions {
     pub providers: Vec<String>,
     pub enrich_osv: bool,
     pub enrich_epss: bool,
+    /// Print stage progress to stderr (CLI sync).
+    pub progress: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
