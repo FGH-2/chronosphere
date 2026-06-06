@@ -83,17 +83,11 @@ impl Executor {
             if !pivot.has_ssh() {
                 anyhow::bail!("pivot '{}' missing ssh_user/ssh_host", pivot.name);
             }
-            if pivot
-                .ssh_password
-                .as_deref()
-                .is_some_and(|s| !s.is_empty())
-            {
-                crate::exec::ssh::ensure_sshpass()?;
-            }
             wrap_for_remote(
                 &req.resolved,
                 pivot,
                 &self.engagement_dir,
+                req.target.as_deref(),
                 &self.jobs_dir,
                 &id,
                 &log_str,

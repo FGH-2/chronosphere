@@ -9,13 +9,14 @@ pub fn wrap_for_remote(
     user_command: &str,
     pivot: &Pivot,
     engagement_dir: &Path,
+    target_name: Option<&str>,
     jobs_dir: &Path,
     job_id: &str,
     log_path: &str,
     status_path: &str,
     interactive: bool,
 ) -> Result<String> {
-    let conn = SshConn::from_pivot(pivot, engagement_dir)?;
+    let conn = SshConn::from_pivot(pivot, engagement_dir, target_name)?;
     let local_script = jobs_dir.join(format!("{}.remote.sh", job_id));
     write_remote_script(&local_script, user_command)?;
     let remote_script = remote_script_path(job_id);
@@ -43,6 +44,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let jobs = dir.join("jobs");
         std::fs::create_dir_all(&jobs).unwrap();
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        std::fs::write(ssh_dir.join("id_web01"), "fake-key").unwrap();
         let pivot = Pivot {
             name: "web01".into(),
             ssh_host: Some("10.10.11.5".into()),
@@ -60,6 +64,7 @@ mod tests {
             "id; whoami",
             &pivot,
             &dir,
+            Some("web01"),
             &jobs,
             "abc-123",
             "/tmp/abc.log",

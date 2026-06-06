@@ -1600,11 +1600,23 @@ impl App {
             }
         };
         if let Some(eng) = self.engagement.as_mut() {
-            if m == ExecutionMode::Remote
-                && eng.pivots.active_remote().is_none_or(|p| !p.has_ssh())
-            {
-                self.flash_error("set a remote pivot with ssh_user/ssh_host first (:pivot)".into());
-                return;
+            if m == ExecutionMode::Remote {
+                let Some(pivot) = eng.pivots.active_remote() else {
+                    self.flash_error("set a remote pivot first (:pivot)".into());
+                    return;
+                };
+                if !pivot.has_ssh() {
+                    self.flash_error("remote pivot needs ssh_user and ssh_host (:pivot)".into());
+                    return;
+                }
+                let target = eng.active_target().map(|t| t.name.as_str());
+                if !crate::exec::ssh::pivot_ssh_auth_available(pivot, &eng.dir, target) {
+                    self.flash_error(
+                        "remote pivot needs ssh_password or an SSH key (ssh_identity or engagement/.ssh/id_*)"
+                            .into(),
+                    );
+                    return;
+                }
             }
             eng.pivots.execution_mode = m;
             let _ = eng.save_pivots();
@@ -2261,10 +2273,10 @@ impl App {
                     c.is_applicable(&|w: &str| crate::render::condition::evaluate(w, &ctx))
                 })
                 .filter(|c| {
-                    if ctx.execution_mode == ExecutionMode::Remote {
-                        c.allows_remote()
-                    } else {
+                    if ctx.execution_mode == ExecutionMode::Local {
                         c.allows_local()
+                    } else {
+                        true
                     }
                 })
                 .map(|c| (cat.id.clone(), c.clone()))
@@ -2305,18 +2317,8 @@ impl App {
         category_id: Option<String>,
         title: String,
         interactive: bool,
-        cmd: Option<&CommandEntry>,
+        _cmd: Option<&CommandEntry>,
     ) {
-        if let Some(c) = cmd {
-            let ctx = self.render_context();
-            if ctx.execution_mode == ExecutionMode::Remote && !c.allows_remote() {
-                self.flash_error(format!(
-                    "'{}' is local-only — use :exec local or pick a remote-safe command",
-                    c.title
-                ));
-                return;
-            }
-        }
         let exe = match self.executor.as_ref() {
             Some(e) => e,
             None => {
@@ -2999,10 +3001,10 @@ impl App {
             .iter()
             .filter(|c| c.is_applicable(&|w: &str| crate::render::condition::evaluate(w, &ctx)))
             .filter(|c| {
-                if ctx.execution_mode == ExecutionMode::Remote {
-                    c.allows_remote()
-                } else {
+                if ctx.execution_mode == ExecutionMode::Local {
                     c.allows_local()
+                } else {
+                    true
                 }
             })
             .cloned()

@@ -37,7 +37,7 @@ const HELP: &[(&str, &str)] = &[
     (":target", "list/edit/switch active host target"),
     (":ap", "list/edit/switch active WiFi access point"),
     (":pivot", "list/edit foothold pivots; tunnel (T) + remote (R) markers"),
-    (":exec local|remote", "run commands locally or via scp+ssh on remote pivot"),
+    (":exec local|remote", "run commands locally or via scp+ssh on remote pivot (all commands allowed in remote mode)"),
     (":creds", "list/edit/switch active credential profile"),
     (":variable", "template vars (iface, wordlist, …) — globals; WiFi fields live on :ap"),
     (":variable name=value", "quick-set one variable from the command palette"),

@@ -5,6 +5,103 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Slug for default engagement SSH key filenames (`id_{slug}`), aligned with `{pivot_ssh_key}`.
+pub fn slugify_key_name(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if s.is_empty() {
+        "pivot".into()
+    } else {
+        s
+    }
+}
+
+/// Default private key path when `ssh_identity` is unset: `engagement/.ssh/id_{target_or_pivot}`.
+pub fn default_ssh_key_path(
+    engagement_dir: &Path,
+    target_name: Option<&str>,
+    pivot_name: &str,
+) -> PathBuf {
+    let slug = target_name
+        .map(slugify_key_name)
+        .unwrap_or_else(|| slugify_key_name(pivot_name));
+    engagement_dir.join(".ssh").join(format!("id_{slug}"))
+}
+
+/// Resolve private key: explicit `ssh_identity`, else default path if the file exists.
+pub fn resolve_ssh_identity(
+    pivot: &Pivot,
+    engagement_dir: &Path,
+    target_name: Option<&str>,
+) -> Option<PathBuf> {
+    if let Some(id) = pivot.ssh_identity.as_ref().filter(|s| !s.is_empty()) {
+        return Some(PathBuf::from(id));
+    }
+    let default = default_ssh_key_path(engagement_dir, target_name, &pivot.name);
+    default.exists().then_some(default)
+}
+
+/// Whether remote mode can be enabled (host/user plus password or a usable key).
+pub fn pivot_ssh_auth_available(
+    pivot: &Pivot,
+    engagement_dir: &Path,
+    target_name: Option<&str>,
+) -> bool {
+    if pivot.ssh_password.as_deref().is_some_and(|s| !s.is_empty()) {
+        return true;
+    }
+    resolve_ssh_identity(pivot, engagement_dir, target_name)
+        .is_some_and(|p| p.exists())
+}
+
+/// Pick key auth when a key file exists; otherwise password. Never combine sshpass with `-i`.
+pub fn resolve_ssh_auth(
+    pivot: &Pivot,
+    engagement_dir: &Path,
+    target_name: Option<&str>,
+) -> Result<(Option<PathBuf>, Option<String>)> {
+    if let Some(id) = pivot.ssh_identity.as_ref().filter(|s| !s.is_empty()) {
+        let path = PathBuf::from(id);
+        if !path.exists() {
+            bail!(
+                "pivot '{}' ssh_identity not found: {}",
+                pivot.name,
+                path.display()
+            );
+        }
+        return Ok((Some(path), None));
+    }
+
+    if let Some(path) = resolve_ssh_identity(pivot, engagement_dir, target_name) {
+        return Ok((Some(path), None));
+    }
+
+    if let Some(pw) = pivot
+        .ssh_password
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .cloned()
+    {
+        ensure_sshpass()?;
+        return Ok((None, Some(pw)));
+    }
+
+    let hint = default_ssh_key_path(engagement_dir, target_name, &pivot.name);
+    bail!(
+        "pivot '{}' has no SSH auth: set ssh_password, set ssh_identity, or create {}",
+        pivot.name,
+        hint.display()
+    );
+}
+
 #[derive(Debug, Clone)]
 pub struct SshConn {
     pub target: String,
@@ -15,26 +112,23 @@ pub struct SshConn {
 }
 
 impl SshConn {
-    pub fn from_pivot(pivot: &Pivot, engagement_dir: &Path) -> Result<Self> {
+    pub fn from_pivot(
+        pivot: &Pivot,
+        engagement_dir: &Path,
+        target_name: Option<&str>,
+    ) -> Result<Self> {
         let target = pivot
             .ssh_spec()
             .ok_or_else(|| anyhow::anyhow!("pivot '{}' missing ssh_user/ssh_host", pivot.name))?;
+        let (identity, password) = resolve_ssh_auth(pivot, engagement_dir, target_name)?;
         let ssh_dir = engagement_dir.join(".ssh");
         std::fs::create_dir_all(&ssh_dir).ok();
         let control_path = ssh_dir.join(format!("cm-{}", pivot.name.replace('/', "_")));
         Ok(Self {
             target,
             port: pivot.ssh_port.unwrap_or(22),
-            identity: pivot
-                .ssh_identity
-                .as_ref()
-                .filter(|s| !s.is_empty())
-                .map(PathBuf::from),
-            password: pivot
-                .ssh_password
-                .as_ref()
-                .filter(|s| !s.is_empty())
-                .cloned(),
+            identity,
+            password,
             control_path,
         })
     }
@@ -277,5 +371,63 @@ mod tests {
         );
         assert!(w.contains("sshpass"));
         assert!(w.contains("s3cret"));
+    }
+
+    #[test]
+    fn resolve_ssh_auth_prefers_key_over_password() {
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("chrono-ssh-auth-{n}"));
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        let key = ssh_dir.join("id_mytarget");
+        std::fs::write(&key, "fake-key").unwrap();
+
+        let pivot = Pivot {
+            name: "web01".into(),
+            ssh_host: Some("10.0.0.5".into()),
+            ssh_user: Some("user".into()),
+            ssh_password: Some("secret".into()),
+            ..Pivot::default()
+        };
+        let (identity, password) =
+            resolve_ssh_auth(&pivot, &dir, Some("mytarget")).unwrap();
+        assert!(identity.is_some());
+        assert!(password.is_none());
+        let w = SshConn::from_pivot(&pivot, &dir, Some("mytarget"))
+            .unwrap()
+            .remote_script_wrapper(
+                Path::new("/tmp/a.sh"),
+                "/tmp/chrono-id.sh",
+                "/tmp/id.log",
+                "/tmp/id.status",
+                false,
+            );
+        assert!(!w.contains("sshpass"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_ssh_auth_uses_default_key_path() {
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("chrono-ssh-key-{n}"));
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        std::fs::write(ssh_dir.join("id_htb-box"), "fake-key").unwrap();
+
+        let pivot = Pivot {
+            name: "foothold".into(),
+            ssh_host: Some("10.0.0.5".into()),
+            ssh_user: Some("user".into()),
+            ..Pivot::default()
+        };
+        let path = resolve_ssh_identity(&pivot, &dir, Some("htb-box")).unwrap();
+        assert_eq!(path, ssh_dir.join("id_htb-box"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -14,7 +14,8 @@ order = 13
 # Chisel/SOCKS commands deferred to a follow-up release.
 #
 # Limitations: ligolo is operator-managed (long-running); remote mode runs bash on pivot via scp+ssh;
-# no WinRM; Kerberos/Impacket stay local; credentials may appear in remote shell history.
+# no WinRM; Kerberos/Impacket templates still render locally but run on pivot when :exec remote;
+# credentials may appear in remote shell history.
 
 [[command]]
 id = "pivot.ligolo.proxy"
