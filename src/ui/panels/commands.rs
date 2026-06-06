@@ -63,7 +63,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let mut state = ListState::default();
-    state.select(Some(app.selected_command.min(visible.len().saturating_sub(1))));
+    let selected = app
+        .effective_command_index()
+        .unwrap_or(0)
+        .min(visible.len().saturating_sub(1));
+    if !visible.is_empty() {
+        state.select(Some(selected));
+    }
     let list = List::new(items)
         .block(block)
         .highlight_style(Theme::selected())

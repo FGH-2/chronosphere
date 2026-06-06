@@ -1013,23 +1013,30 @@ impl App {
     }
 
     fn commit_search_selection(&mut self) {
-        if let Modal::Search { matches, cursor, .. } = &self.modal {
-            if let Some(hit) = matches.get(*cursor) {
-                let cat_id = hit.category_id.clone();
-                let cmd_id = hit.command_id.clone();
-                if let Some(cat_idx) = self
-                    .library
-                    .categories
-                    .iter()
-                    .position(|c| c.id == cat_id)
-                {
-                    self.selected_category = cat_idx;
-                    let visible = self.visible_commands();
-                    if let Some(pos) = visible.iter().position(|c| c.id == cmd_id) {
-                        self.selected_command = pos;
-                    }
-                    self.focus = Focus::Commands;
+        let selection = if let Modal::Search { matches, cursor, .. } = &self.modal {
+            matches.get(*cursor).cloned()
+        } else {
+            None
+        };
+        if let Some(hit) = selection {
+            if let Some(cat_idx) = self
+                .library
+                .categories
+                .iter()
+                .position(|c| c.id == hit.category_id)
+            {
+                self.selected_category = cat_idx;
+                self.clamp_selected_command();
+                let visible = self.visible_commands();
+                if let Some(pos) = visible.iter().position(|c| c.id == hit.command_id) {
+                    self.selected_command = pos;
+                } else {
+                    self.flash_error(format!(
+                        "'{}' is not runnable in the current context (check :exec mode, target, creds)",
+                        hit.title
+                    ));
                 }
+                self.focus = Focus::Commands;
             }
         }
         self.modal = Modal::None;
@@ -1332,6 +1339,21 @@ impl App {
             let _ = fs::create_dir_all(parent);
         }
         let _ = fs::write(config::last_engagement_marker(), &eng.meta.name);
+        let mut eng = eng;
+        let downgraded_remote = if eng.pivots.execution_mode == ExecutionMode::Remote {
+            let target = eng.active_target().map(|t| t.name.as_str());
+            let ready = Self::resolve_remote_pivot(&eng)
+                .is_some_and(|p| crate::exec::ssh::pivot_ssh_auth_available(&p, &eng.dir, target));
+            if !ready {
+                eng.pivots.execution_mode = ExecutionMode::Local;
+                let _ = eng.save_pivots();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         self.executor = Some(Executor::init(&eng));
         self.jobs = eng.history.recent.clone();
         self.engagement = Some(eng);
@@ -1339,6 +1361,11 @@ impl App {
             collect_library_sources(self.engagement.as_ref().map(|e| e.dir.as_path()));
         self.setup_library_watcher();
         self.reload_library();
+        if downgraded_remote {
+            self.flash_error(
+                "saved remote exec was not configured — set pivot SSH auth, then :exec remote".into(),
+            );
+        }
     }
 
     fn try_open_engagement_by_name(&mut self, name: &str) {
@@ -1605,16 +1632,14 @@ impl App {
         };
         if let Some(eng) = self.engagement.as_mut() {
             if m == ExecutionMode::Remote {
-                let Some(pivot) = eng.pivots.active_remote() else {
-                    self.flash_error("set a remote pivot first (:pivot)".into());
+                let Some(pivot) = Self::resolve_remote_pivot(eng) else {
+                    self.flash_error(
+                        "set a remote pivot with ssh_user and ssh_host first (:pivot)".into(),
+                    );
                     return;
                 };
-                if !pivot.has_ssh() {
-                    self.flash_error("remote pivot needs ssh_user and ssh_host (:pivot)".into());
-                    return;
-                }
                 let target = eng.active_target().map(|t| t.name.as_str());
-                if !crate::exec::ssh::pivot_ssh_auth_available(pivot, &eng.dir, target) {
+                if !crate::exec::ssh::pivot_ssh_auth_available(&pivot, &eng.dir, target) {
                     self.flash_error(
                         "remote pivot needs ssh_password or an SSH key (ssh_identity or engagement/.ssh/id_*)"
                             .into(),
@@ -1624,7 +1649,35 @@ impl App {
             }
             eng.pivots.execution_mode = m;
             let _ = eng.save_pivots();
+            self.clamp_selected_command();
             self.flash_ok(format!("execution mode: {}", m.as_str()));
+        }
+    }
+
+    /// SSH pivot used for scp/ssh remote runs (active remote, else active tunnel).
+    fn resolve_remote_pivot(eng: &Engagement) -> Option<Pivot> {
+        eng.pivots
+            .active_remote()
+            .or_else(|| eng.pivots.active_tunnel())
+            .filter(|p| p.has_ssh())
+            .cloned()
+    }
+
+    fn clamp_selected_command(&mut self) {
+        let len = self.visible_commands().len();
+        if len == 0 {
+            self.selected_command = 0;
+        } else if self.selected_command >= len {
+            self.selected_command = len - 1;
+        }
+    }
+
+    pub fn effective_command_index(&self) -> Option<usize> {
+        let len = self.visible_commands().len();
+        if len == 0 {
+            None
+        } else {
+            Some(self.selected_command.min(len - 1))
         }
     }
 
@@ -2235,9 +2288,19 @@ impl App {
     // === command running =================================================
 
     fn run_current(&mut self, count: u32) {
+        self.clamp_selected_command();
         let cmd = match self.current_command() {
             Some(c) => c.clone(),
-            None => return,
+            None => {
+                if self.visible_commands().is_empty() {
+                    self.flash_error(
+                        "no runnable commands in this category (check filters, target, creds)".into(),
+                    );
+                } else {
+                    self.flash_error("no command selected — move cursor (j/k) to a command".into());
+                }
+                return;
+            }
         };
         let cat_id = match self.current_category() {
             Some(c) => c.id.clone(),
@@ -2330,43 +2393,58 @@ impl App {
                 return;
             }
         };
-        let (execution_mode, remote_pivot, pivot_name, execution_label) = self
-            .engagement
+        let engagement = match self.engagement.as_ref() {
+            Some(e) => e,
+            None => {
+                self.flash_error("no engagement loaded".into());
+                return;
+            }
+        };
+        let execution_mode = engagement.pivots.execution_mode;
+        let remote_pivot = Self::resolve_remote_pivot(engagement);
+        if execution_mode == ExecutionMode::Remote {
+            let Some(pivot) = remote_pivot.as_ref() else {
+                self.flash_error(
+                    "remote exec needs an active pivot with ssh_user and ssh_host (:pivot)".into(),
+                );
+                return;
+            };
+            let target = engagement.active_target().map(|t| t.name.as_str());
+            if let Err(err) =
+                crate::exec::ssh::resolve_ssh_auth(pivot, &engagement.dir, target)
+            {
+                self.flash_error(format!("remote SSH not ready: {err}"));
+                return;
+            }
+        }
+        let pivot_name = remote_pivot
             .as_ref()
-            .map(|e| {
-                let label = if e.pivots.execution_mode == ExecutionMode::Remote {
-                    format!("remote@{}", e.pivots.active_remote().map(|p| p.name.as_str()).unwrap_or("?"))
-                } else {
-                    "local".to_string()
-                };
-                (
-                    e.pivots.execution_mode,
-                    e.pivots.active_remote().cloned(),
-                    e.pivots
-                        .active_remote()
-                        .or_else(|| e.pivots.active_tunnel())
-                        .map(|p| p.name.clone()),
-                    label,
-                )
-            })
-            .unwrap_or((ExecutionMode::Local, None, None, "local".into()));
+            .map(|p| p.name.clone())
+            .or_else(|| {
+                engagement
+                    .pivots
+                    .active_tunnel()
+                    .map(|p| p.name.clone())
+            });
+        let execution_label = if execution_mode == ExecutionMode::Remote {
+            format!(
+                "remote@{}",
+                remote_pivot
+                    .as_ref()
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("?")
+            )
+        } else {
+            "local".to_string()
+        };
         let req = SpawnRequest {
             command_id: category_id.map(|cid| format!("{}.{}", cid, slug(&title))),
             command_title: title,
             resolved,
             interactive,
-            target: self
-                .engagement
-                .as_ref()
-                .and_then(|e| e.active_target().map(|t| t.name.clone())),
-            profile: self
-                .engagement
-                .as_ref()
-                .and_then(|e| e.active_profile().map(|p| p.name.clone())),
-            ap: self
-                .engagement
-                .as_ref()
-                .and_then(|e| e.active_ap().map(|a| a.name.clone())),
+            target: engagement.active_target().map(|t| t.name.clone()),
+            profile: engagement.active_profile().map(|p| p.name.clone()),
+            ap: engagement.active_ap().map(|a| a.name.clone()),
             pivot: pivot_name,
             execution: Some(execution_label),
             execution_mode,
@@ -2993,6 +3071,7 @@ impl App {
                     .selected_category
                     .min(self.library.categories.len().saturating_sub(1));
                 self.selected_command = 0;
+                self.clamp_selected_command();
                 self.flash_ok("library reloaded".into());
             }
             Err(err) => self.flash_error(format!("reload: {}", err)),
@@ -3026,7 +3105,8 @@ impl App {
     }
 
     pub fn current_command(&self) -> Option<CommandEntry> {
-        self.visible_commands().get(self.selected_command).cloned()
+        let idx = self.effective_command_index()?;
+        self.visible_commands().get(idx).cloned()
     }
 
     pub fn command_is_applicable(&self, cmd: &CommandEntry) -> bool {

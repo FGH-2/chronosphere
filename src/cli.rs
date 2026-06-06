@@ -880,10 +880,11 @@ alias chronosphere='{bin}'
                         let pivot = e
                             .pivots
                             .active_remote()
-                            .ok_or_else(|| anyhow!("set a remote pivot first"))?;
-                        if !pivot.has_ssh() {
-                            bail!("remote pivot needs ssh_user and ssh_host");
-                        }
+                            .or_else(|| e.pivots.active_tunnel())
+                            .filter(|p| p.has_ssh())
+                            .ok_or_else(|| {
+                                anyhow!("set a remote pivot with ssh_user and ssh_host first")
+                            })?;
                         let target = e.active_target().map(|t| t.name.as_str());
                         if !crate::exec::ssh::pivot_ssh_auth_available(pivot, &e.dir, target) {
                             bail!(
