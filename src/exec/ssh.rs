@@ -137,11 +137,9 @@ impl SshConn {
         self.password.is_some()
     }
 
-    fn base_ssh_args(&self) -> Vec<String> {
+    fn connection_opts(&self) -> Vec<String> {
         let cp = self.control_path.to_string_lossy().to_string();
-        let mut v = vec![
-            "-p".into(),
-            self.port.to_string(),
+        vec![
             "-o".into(),
             "StrictHostKeyChecking=accept-new".into(),
             "-o".into(),
@@ -152,11 +150,31 @@ impl SshConn {
             "ControlPersist=10m".into(),
             "-o".into(),
             "ServerAliveInterval=30".into(),
-        ];
+        ]
+    }
+
+    fn identity_args(&self) -> Vec<String> {
+        let mut v = Vec::new();
         if let Some(id) = &self.identity {
             v.push("-i".into());
             v.push(id.to_string_lossy().into_owned());
         }
+        v
+    }
+
+    /// OpenSSH `ssh` port flag is lowercase `-p`.
+    fn base_ssh_args(&self) -> Vec<String> {
+        let mut v = vec!["-p".into(), self.port.to_string()];
+        v.extend(self.connection_opts());
+        v.extend(self.identity_args());
+        v
+    }
+
+    /// OpenSSH `scp` port flag is uppercase `-P` (lowercase `-p` means preserve mtimes).
+    fn base_scp_args(&self) -> Vec<String> {
+        let mut v = vec!["-P".into(), self.port.to_string()];
+        v.extend(self.connection_opts());
+        v.extend(self.identity_args());
         v
     }
 
@@ -176,7 +194,7 @@ impl SshConn {
     }
 
     pub fn scp_to_remote(&self, local: &Path, remote_path: &str) -> Result<()> {
-        let mut args = self.base_ssh_args();
+        let mut args = self.base_scp_args();
         args.push(local.to_string_lossy().into_owned());
         args.push(format!("{}:{}", self.target, remote_path));
         let shell = self.wrap_prog("scp", &args);
@@ -204,7 +222,7 @@ impl SshConn {
         let status = shell_escape(status_path);
         let target = shell_escape(&self.target);
 
-        let mut scp_args = self.base_ssh_args();
+        let mut scp_args = self.base_scp_args();
         scp_args.push(local_script.to_string_lossy().into_owned());
         scp_args.push(format!("{}:{}", self.target, remote_script));
         let scp_cmd = self.wrap_prog("scp", &scp_args);
@@ -351,6 +369,8 @@ mod tests {
         assert!(w.contains("scp"));
         assert!(w.contains("ssh"));
         assert!(w.contains("tee"));
+        assert!(w.contains("scp -P 22") || w.contains("scp -P '22'") || w.contains("scp -P \"22\""));
+        assert!(w.contains("ssh -p 22") || w.contains("ssh -p '22'") || w.contains("ssh -p \"22\""));
     }
 
     #[test]
