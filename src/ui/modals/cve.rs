@@ -37,6 +37,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .constraints([
             Constraint::Length(2),
             Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Min(4),
             Constraint::Length(1),
         ])
@@ -49,15 +50,31 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     ]);
     f.render_widget(Paragraph::new(prompt), layout[0]);
 
+    let size = crate::config::format_storage_size(modal.db_size_bytes);
+    let stats = if modal.db_total > 0 || modal.db_size_bytes > 0 {
+        format!(
+            "{} CVEs · {} KEV · {}",
+            modal.db_total,
+            modal.db_kev,
+            size,
+        )
+    } else {
+        "empty index — press s to sync".into()
+    };
+    f.render_widget(
+        Paragraph::new(stats).style(Theme::muted()),
+        layout[1],
+    );
+
     let chips = format!(
-        "{}  {}  j/k move  Enter detail  y yank  s sync  K KEV{}  Esc close",
+        "{}  {} shown  j/k move  Enter detail  y yank  s sync  K KEV{}  Esc close",
         if modal.kev_only { "[KEV]" } else { "[all]" },
         modal.results.len(),
         if modal.kev_only { "✓" } else { "" },
     );
     f.render_widget(
         Paragraph::new(chips).style(Theme::muted()),
-        layout[1],
+        layout[2],
     );
 
     let items: Vec<ListItem> = modal
@@ -86,14 +103,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let list = List::new(items)
         .highlight_style(Theme::selected())
         .highlight_symbol("▶ ");
-    f.render_stateful_widget(list, layout[2], &mut state);
+    f.render_stateful_widget(list, layout[3], &mut state);
 
     let hint = if modal.results.is_empty() {
         "No matches — run :cve then press s to sync, or type to search"
     } else {
         ""
     };
-    f.render_widget(Paragraph::new(hint).style(Theme::muted()), layout[3]);
+    f.render_widget(Paragraph::new(hint).style(Theme::muted()), layout[4]);
 }
 
 fn render_detail(f: &mut Frame, area: Rect, modal: &CveModal) {

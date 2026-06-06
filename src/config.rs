@@ -88,4 +88,42 @@ pub fn cve_config_path() -> PathBuf {
     config_dir().join("cve.toml")
 }
 
+/// On-disk size of the CVE store (SQLite db + WAL/SHM sidecars + sync-state).
+pub fn cve_storage_size_bytes() -> u64 {
+    let dir = cve_dir();
+    ["cve.db", "cve.db-wal", "cve.db-shm", "sync-state.json"]
+        .iter()
+        .map(|name| dir.join(name))
+        .filter_map(|p| std::fs::metadata(&p).ok())
+        .map(|m| m.len())
+        .sum()
+}
+
+pub fn format_storage_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 pub const TMUX_SESSION: &str = "chronosphere";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_storage_size_scales() {
+        assert_eq!(format_storage_size(512), "512 B");
+        assert_eq!(format_storage_size(2048), "2.0 KB");
+        assert_eq!(format_storage_size(5 * 1024 * 1024), "5.0 MB");
+    }
+}

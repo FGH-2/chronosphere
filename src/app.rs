@@ -391,6 +391,9 @@ pub struct CveModal {
     pub detail: bool,
     pub kev_only: bool,
     pub syncing: bool,
+    pub db_total: u64,
+    pub db_kev: u64,
+    pub db_size_bytes: u64,
 }
 
 #[derive(Default)]
@@ -640,6 +643,7 @@ impl App {
                                 m.syncing = false;
                                 m.results = Self::load_cve_results(&m.query, m.kev_only);
                                 m.cursor = 0;
+                                Self::refresh_cve_modal_stats(m);
                             }
                         }
                         Err(e) => {
@@ -2689,10 +2693,20 @@ impl App {
 
     fn open_cve_modal(&mut self) {
         let results = Self::load_cve_results("", false);
-        self.modal = Modal::Cve(CveModal {
+        let mut modal = CveModal {
             results,
             ..Default::default()
-        });
+        };
+        Self::refresh_cve_modal_stats(&mut modal);
+        self.modal = Modal::Cve(modal);
+    }
+
+    fn refresh_cve_modal_stats(modal: &mut CveModal) {
+        if let Ok(st) = crate::cve::status() {
+            modal.db_total = st.total;
+            modal.db_kev = st.kev_count;
+            modal.db_size_bytes = st.db_size_bytes;
+        }
     }
 
     fn load_cve_results(query: &str, kev_only: bool) -> Vec<crate::cve::CveRecord> {

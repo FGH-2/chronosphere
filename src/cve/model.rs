@@ -102,6 +102,8 @@ pub struct CveStatus {
     pub total: u64,
     pub kev_count: u64,
     pub db_path: String,
+    /// Total on-disk bytes for cve.db (+ WAL/SHM) and sync-state.json.
+    pub db_size_bytes: u64,
     pub last_sync: Option<DateTime<Utc>>,
     pub last_nvd_feed: Option<String>,
 }

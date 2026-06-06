@@ -354,6 +354,7 @@ impl CveStore {
             total,
             kev_count,
             db_path: config::cve_db_path().display().to_string(),
+            db_size_bytes: config::cve_storage_size_bytes(),
             last_sync,
             last_nvd_feed: crate::cve::config::SyncState::load()
                 .feeds

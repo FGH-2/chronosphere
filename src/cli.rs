@@ -440,7 +440,10 @@ pub async fn dispatch(cli: Cli) -> Result<bool> {
             println!("engagements: {}", root.display());
             println!("builtins:    {}", config::builtin_commands_dir().display());
             println!("user lib:    {}", config::user_commands_dir().display());
-            println!("cve db:      {}", config::cve_db_path().display());
+            println!("cve db:      {} ({})",
+                config::cve_db_path().display(),
+                config::format_storage_size(config::cve_storage_size_bytes()),
+            );
             Ok(true)
         }
         Command::PathInstall => {
@@ -1056,6 +1059,7 @@ async fn dispatch_cve(cmd: CveCmd) -> Result<()> {
         CveCmd::Status => {
             let st = status()?;
             println!("database:  {}", st.db_path);
+            println!("size:      {} ({} bytes)", config::format_storage_size(st.db_size_bytes), st.db_size_bytes);
             println!("total:     {}", st.total);
             println!("kev:       {}", st.kev_count);
             if let Some(t) = st.last_sync {
