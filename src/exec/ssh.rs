@@ -17,11 +17,7 @@ pub fn slugify_key_name(name: &str) -> String {
             }
         })
         .collect();
-    if s.is_empty() {
-        "pivot".into()
-    } else {
-        s
-    }
+    if s.is_empty() { "pivot".into() } else { s }
 }
 
 /// Default private key path when `ssh_identity` is unset: `engagement/.ssh/id_{target_or_pivot}`.
@@ -58,8 +54,7 @@ pub fn pivot_ssh_auth_available(
     if pivot.ssh_password.as_deref().is_some_and(|s| !s.is_empty()) {
         return true;
     }
-    resolve_ssh_identity(pivot, engagement_dir, target_name)
-        .is_some_and(|p| p.exists())
+    resolve_ssh_identity(pivot, engagement_dir, target_name).is_some_and(|p| p.exists())
 }
 
 /// Pick key auth when a key file exists; otherwise password. Never combine sshpass with `-i`.
@@ -310,7 +305,7 @@ pub struct SshDeploySession {
 
 impl SshDeploySession {
     pub fn run_scp(&self, local: &Path, remote: &str) -> Result<()> {
-        let mut cmd = self.base_cmd("scp");
+        let mut cmd = self.base_cmd("scp", "-P");
         cmd.arg(local).arg(remote);
         let status = cmd.status().with_context(|| "scp")?;
         if !status.success() {
@@ -320,16 +315,20 @@ impl SshDeploySession {
     }
 
     pub fn run_ssh(&self, host: &str, remote_cmd: &str) -> Result<()> {
-        let mut cmd = self.base_cmd("ssh");
+        let mut cmd = self.base_cmd("ssh", "-p");
         cmd.arg(host).arg(remote_cmd);
         let status = cmd.status().with_context(|| "ssh")?;
         if !status.success() {
-            bail!("ssh '{}' failed with status {:?}", remote_cmd, status.code());
+            bail!(
+                "ssh '{}' failed with status {:?}",
+                remote_cmd,
+                status.code()
+            );
         }
         Ok(())
     }
 
-    fn base_cmd(&self, prog: &str) -> Command {
+    fn base_cmd(&self, prog: &str, port_flag: &str) -> Command {
         let mut cmd = if let Some(pw) = &self.password {
             let mut c = Command::new("sshpass");
             c.arg("-p").arg(pw).arg(prog);
@@ -337,7 +336,7 @@ impl SshDeploySession {
         } else {
             Command::new(prog)
         };
-        cmd.arg("-P").arg(self.port.to_string());
+        cmd.arg(port_flag).arg(self.port.to_string());
         cmd.arg("-o").arg("StrictHostKeyChecking=accept-new");
         if let Some(id) = &self.identity {
             cmd.arg("-i").arg(id);
@@ -369,8 +368,12 @@ mod tests {
         assert!(w.contains("scp"));
         assert!(w.contains("ssh"));
         assert!(w.contains("tee"));
-        assert!(w.contains("scp -P 22") || w.contains("scp -P '22'") || w.contains("scp -P \"22\""));
-        assert!(w.contains("ssh -p 22") || w.contains("ssh -p '22'") || w.contains("ssh -p \"22\""));
+        assert!(
+            w.contains("scp -P 22") || w.contains("scp -P '22'") || w.contains("scp -P \"22\"")
+        );
+        assert!(
+            w.contains("ssh -p 22") || w.contains("ssh -p '22'") || w.contains("ssh -p \"22\"")
+        );
     }
 
     #[test]
@@ -412,8 +415,7 @@ mod tests {
             ssh_password: Some("secret".into()),
             ..Pivot::default()
         };
-        let (identity, password) =
-            resolve_ssh_auth(&pivot, &dir, Some("mytarget")).unwrap();
+        let (identity, password) = resolve_ssh_auth(&pivot, &dir, Some("mytarget")).unwrap();
         assert!(identity.is_some());
         assert!(password.is_none());
         let w = SshConn::from_pivot(&pivot, &dir, Some("mytarget"))
@@ -449,5 +451,31 @@ mod tests {
         let path = resolve_ssh_identity(&pivot, &dir, Some("htb-box")).unwrap();
         assert_eq!(path, ssh_dir.join("id_htb-box"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deploy_uses_correct_port_flags_for_ssh_and_scp() {
+        let session = SshDeploySession {
+            port: 2222,
+            identity: None,
+            password: None,
+        };
+
+        let ssh_cmd = session.base_cmd("ssh", "-p");
+        let ssh_args: Vec<String> = ssh_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        assert!(ssh_args.windows(2).any(|w| w[0] == "-p" && w[1] == "2222"));
+        assert!(!ssh_args.iter().any(|a| a == "-P"));
+
+        let scp_cmd = session.base_cmd("scp", "-P");
+        let scp_args: Vec<String> = scp_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        assert!(scp_args.windows(2).any(|w| w[0] == "-P" && w[1] == "2222"));
     }
 }
