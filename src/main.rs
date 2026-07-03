@@ -25,10 +25,14 @@ async fn main() -> Result<()> {
     init_tracing().context("init tracing")?;
     tracing::info!("starting chronosphere");
 
+    if cli::try_early_dispatch().await.context("dispatch subcommand cli")? {
+        return Ok(());
+    }
+
     let cli = cli::Cli::parse();
     let boot = app::AppBoot {
-        engagement: cli.engagement.clone(),
-        root: cli.root.clone(),
+        engagement: cli.opts.engagement.clone(),
+        root: cli.opts.root.clone(),
     };
     if cli::dispatch(cli).await.context("dispatch cli")? {
         return Ok(());
