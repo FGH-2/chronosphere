@@ -16,9 +16,10 @@ use clap::{Args, Parser, Subcommand};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Parser, Debug)]
-#[command(name = "chronosphere", version, about = "Vim TUI + CLI for pentest engagement commands", long_about = None)]
-pub struct Cli {
+// Engagement / targeting flags shared by library and CRUD subcommands.
+#[derive(Args, Debug, Clone, Default)]
+#[command(next_help_heading = "Engagement")]
+pub struct EngagementOpts {
     /// Engagement name (defaults to last-used or single existing one).
     #[arg(short = 'e', long, global = true)]
     pub engagement: Option<String>,
@@ -38,6 +39,19 @@ pub struct Cli {
     /// Access point name to apply for this invocation.
     #[arg(short = 'a', long, global = true)]
     pub ap: Option<String>,
+}
+
+impl EngagementOpts {
+    pub fn engagements_root(&self) -> PathBuf {
+        self.root.clone().unwrap_or_else(config::engagements_root)
+    }
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "chronosphere", version, about = "Vim TUI + CLI for pentest engagement commands", long_about = None)]
+pub struct Cli {
+    #[command(flatten)]
+    pub opts: EngagementOpts,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -168,7 +182,7 @@ pub enum CveCmd {
         /// Import all year feeds (not just modified/recent). Mutually exclusive with `--month`.
         #[arg(long, conflicts_with = "month")]
         full: bool,
-        /// Year range or list (e.g. 2024-2026 or 2025,2026). Ignored when `--month` is set.
+        /// Year range or list (e.g. 2024-2026 or 2025,2026). Implies `--full`. Ignored when `--month` is set.
         #[arg(long, conflicts_with = "month")]
         years: Option<String>,
         /// Sync one calendar month via NVD API (e.g. 2026-05). Smaller than `--full`.
@@ -397,6 +411,478 @@ pub enum VariableCmd {
     },
 }
 
+// --- Per-subcommand parsers (clean `--help` without unrelated root flags) ---
+
+macro_rules! engagement_cli {
+    ($(#[$meta:meta])* $name:ident, $sub:literal, $($field:tt)*) => {
+        $(#[$meta])*
+        pub struct $name {
+            #[command(flatten)]
+            pub engagement: EngagementOpts,
+            $($field)*
+        }
+    };
+}
+
+macro_rules! standalone_cli {
+    ($(#[$meta:meta])* $name:ident, $sub:literal, $($field:tt)*) => {
+        $(#[$meta])*
+        pub struct $name {
+            $($field)*
+        }
+    };
+}
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere list", about = "List engagements / categories / commands", disable_version_flag = true)]
+    ListCli, "list",
+    #[command(flatten)]
+    pub args: ListArgs,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere show", about = "Show a command (resolved with current target/creds)", disable_version_flag = true)]
+    ShowCli, "show",
+    pub id: String,
+    #[arg(short = 'v', long = "var", value_name = "KEY=VALUE")]
+    pub vars: Vec<String>,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere render", about = "Print the resolved command (shell-safe, single line)", disable_version_flag = true)]
+    RenderCli, "render",
+    pub id: String,
+    #[arg(short = 'v', long = "var", value_name = "KEY=VALUE")]
+    pub vars: Vec<String>,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere yank", about = "Render and copy a command to the clipboard", disable_version_flag = true)]
+    YankCli, "yank",
+    pub id: String,
+    #[arg(long)]
+    pub raw: bool,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere run", about = "Execute a command (runs in current shell, prints output)", disable_version_flag = true)]
+    RunCli, "run",
+    pub id: String,
+    #[arg(short = 'v', long = "var", value_name = "KEY=VALUE")]
+    pub vars: Vec<String>,
+    #[arg(long)]
+    pub dry_run: bool,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere search", about = "Search the command library", disable_version_flag = true)]
+    SearchCli, "search",
+    pub query: String,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(
+        name = "chronosphere targets",
+        about = "Target CRUD",
+        disable_version_flag = true,
+        subcommand_required = true,
+        arg_required_else_help = true,
+    )]
+    TargetsCli, "targets",
+    #[command(subcommand)]
+    pub command: TargetCmd,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(
+        name = "chronosphere aps",
+        about = "WiFi access point CRUD",
+        disable_version_flag = true,
+        subcommand_required = true,
+        arg_required_else_help = true,
+    )]
+    ApsCli, "aps",
+    #[command(subcommand)]
+    pub command: ApCmd,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(
+        name = "chronosphere pivots",
+        about = "Foothold pivot CRUD (ligolo tunnel + SSH remote exec)",
+        disable_version_flag = true,
+        subcommand_required = true,
+        arg_required_else_help = true,
+    )]
+    PivotsCli, "pivots",
+    #[command(subcommand)]
+    pub command: PivotCmd,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(
+        name = "chronosphere creds",
+        about = "Credential CRUD",
+        disable_version_flag = true,
+        subcommand_required = true,
+        arg_required_else_help = true,
+    )]
+    CredsCli, "creds",
+    #[command(subcommand)]
+    pub command: CredsCmd,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(
+        name = "chronosphere variables",
+        about = "Template variable placeholders for the active engagement",
+        disable_version_flag = true,
+        subcommand_required = true,
+        arg_required_else_help = true,
+    )]
+    VariablesCli, "variables",
+    #[command(subcommand)]
+    pub command: VariableCmd,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere doctor", about = "Check installed tools referenced by the library", disable_version_flag = true)]
+    DoctorCli, "doctor",
+    #[arg(long)]
+    pub missing: bool,
+);
+
+engagement_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere mcp-serve", about = "Run as a Model Context Protocol server on stdio (for cursor-agent etc)", disable_version_flag = true)]
+    McpServeCli, "mcp-serve",
+);
+
+standalone_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere new", about = "Create a new engagement directory", disable_version_flag = true)]
+    NewCli, "new",
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    pub name: String,
+    #[arg(long)]
+    pub notes: Option<String>,
+);
+
+standalone_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere update-templates", about = "Extract embedded built-in commands to the user data dir", disable_version_flag = true)]
+    UpdateTemplatesCli, "update-templates",
+    #[arg(long)]
+    pub force: bool,
+);
+
+standalone_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere where", about = "Print where chronosphere stores things", disable_version_flag = true)]
+    WhereCli, "where",
+);
+
+standalone_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere path-install", about = "Print an `eval $(chronosphere path-install)` snippet for shell setup", disable_version_flag = true)]
+    PathInstallCli, "path-install",
+);
+
+standalone_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere mcp-config", about = "Print an mcp.json snippet to wire chronosphere into Cursor / Claude clients", disable_version_flag = true)]
+    McpConfigCli, "mcp-config",
+    #[arg(long)]
+    pub ssh: Option<String>,
+    #[arg(long, default_value_t = 22)]
+    pub port: u16,
+    #[arg(long, default_value = "/usr/local/bin/chronosphere")]
+    pub remote_path: String,
+    #[arg(long)]
+    pub identity: Option<PathBuf>,
+);
+
+standalone_cli!(
+    #[derive(Parser, Debug)]
+    #[command(name = "chronosphere deploy", about = "Ship the chronosphere binary to a remote host via scp (Pwnbox, lab box, etc)", disable_version_flag = true)]
+    DeployCli, "deploy",
+    #[command(flatten)]
+    pub args: crate::deploy::DeployArgs,
+);
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "chronosphere cve",
+    about = "Local CVE index: sync, search, and browse vulnerability data",
+    long_about = None,
+    disable_version_flag = true,
+    subcommand_required = true,
+    arg_required_else_help = true,
+    after_help = "Examples:
+  chronosphere cve sync                         Incremental sync (modified + recent feeds)
+  chronosphere cve sync --month 2026-03         One month via NVD API
+  chronosphere cve sync --years 2025            Full year feed (implies --full)
+  chronosphere cve search nginx rce --limit 20
+  chronosphere cve show CVE-2024-3400
+
+Run `chronosphere cve sync --help` for all sync flags."
+)]
+pub struct CveCli {
+    #[command(subcommand)]
+    pub command: CveCmd,
+}
+
+const TOP_LEVEL_SUBCOMMANDS: &[&str] = &[
+    "new",
+    "list",
+    "show",
+    "render",
+    "yank",
+    "run",
+    "search",
+    "targets",
+    "aps",
+    "pivots",
+    "creds",
+    "variables",
+    "doctor",
+    "update-templates",
+    "where",
+    "path-install",
+    "mcp-serve",
+    "mcp-config",
+    "deploy",
+    "cve",
+    "tui",
+];
+
+fn engagement_flag_takes_value(flag: &str) -> bool {
+    matches!(
+        flag,
+        "-e" | "--engagement" | "--root" | "-t" | "--target" | "-c" | "--creds" | "-a" | "--ap"
+    )
+}
+
+fn is_engagement_flag(arg: &str) -> bool {
+    engagement_flag_takes_value(arg)
+}
+
+fn find_top_level_subcommand() -> Option<(usize, &'static str)> {
+    let args: Vec<String> = std::env::args().collect();
+    let mut i = 1;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a == "--" {
+            return None;
+        }
+        if a.starts_with('-') {
+            if engagement_flag_takes_value(a) && i + 1 < args.len() {
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        for sub in TOP_LEVEL_SUBCOMMANDS {
+            if a == *sub {
+                return Some((i, sub));
+            }
+        }
+        return None;
+    }
+    None
+}
+
+fn build_subcommand_argv(sub_idx: usize, sub: &str) -> Vec<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let mut out = vec![format!("chronosphere {sub}")];
+    let mut i = 1;
+    while i < sub_idx {
+        if is_engagement_flag(&args[i]) {
+            out.push(args[i].clone());
+            if engagement_flag_takes_value(&args[i]) && i + 1 < sub_idx {
+                i += 1;
+                out.push(args[i].clone());
+            }
+        }
+        i += 1;
+    }
+    out.extend(args[sub_idx + 1..].iter().cloned());
+    out
+}
+
+fn cli_from(opts: EngagementOpts, command: Command) -> Cli {
+    Cli {
+        opts,
+        command: Some(command),
+    }
+}
+
+/// Parse and run when argv names a top-level subcommand (clean per-command `--help`).
+pub async fn try_early_dispatch() -> Result<bool> {
+    let Some((sub_idx, sub)) = find_top_level_subcommand() else {
+        return Ok(false);
+    };
+    if sub == "tui" {
+        return Ok(false);
+    }
+
+    let argv = build_subcommand_argv(sub_idx, sub);
+    let handled = match sub {
+        "new" => {
+            let c = NewCli::parse_from(&argv);
+            let mut opts = EngagementOpts::default();
+            opts.root = c.root;
+            dispatch(cli_from(
+                opts,
+                Command::New {
+                    name: c.name,
+                    notes: c.notes,
+                },
+            ))
+            .await?
+        }
+        "list" => {
+            let c = ListCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::List(c.args))).await?
+        }
+        "show" => {
+            let c = ShowCli::parse_from(&argv);
+            dispatch(cli_from(
+                c.engagement,
+                Command::Show {
+                    id: c.id,
+                    vars: c.vars,
+                },
+            ))
+            .await?
+        }
+        "render" => {
+            let c = RenderCli::parse_from(&argv);
+            dispatch(cli_from(
+                c.engagement,
+                Command::Render {
+                    id: c.id,
+                    vars: c.vars,
+                },
+            ))
+            .await?
+        }
+        "yank" => {
+            let c = YankCli::parse_from(&argv);
+            dispatch(cli_from(
+                c.engagement,
+                Command::Yank {
+                    id: c.id,
+                    raw: c.raw,
+                },
+            ))
+            .await?
+        }
+        "run" => {
+            let c = RunCli::parse_from(&argv);
+            dispatch(cli_from(
+                c.engagement,
+                Command::Run {
+                    id: c.id,
+                    vars: c.vars,
+                    dry_run: c.dry_run,
+                },
+            ))
+            .await?
+        }
+        "search" => {
+            let c = SearchCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::Search { query: c.query })).await?
+        }
+        "targets" => {
+            let c = TargetsCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::Targets(c.command))).await?
+        }
+        "aps" => {
+            let c = ApsCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::Aps(c.command))).await?
+        }
+        "pivots" => {
+            let c = PivotsCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::Pivots(c.command))).await?
+        }
+        "creds" => {
+            let c = CredsCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::Creds(c.command))).await?
+        }
+        "variables" => {
+            let c = VariablesCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::Variables(c.command))).await?
+        }
+        "doctor" => {
+            let c = DoctorCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::Doctor { missing: c.missing })).await?
+        }
+        "update-templates" => {
+            let c = UpdateTemplatesCli::parse_from(&argv);
+            dispatch(cli_from(
+                EngagementOpts::default(),
+                Command::UpdateTemplates { force: c.force },
+            ))
+            .await?
+        }
+        "where" => {
+            let _c = WhereCli::parse_from(&argv);
+            dispatch(cli_from(EngagementOpts::default(), Command::Where)).await?
+        }
+        "path-install" => {
+            let _c = PathInstallCli::parse_from(&argv);
+            dispatch(cli_from(EngagementOpts::default(), Command::PathInstall)).await?
+        }
+        "mcp-serve" => {
+            let c = McpServeCli::parse_from(&argv);
+            dispatch(cli_from(c.engagement, Command::McpServe)).await?
+        }
+        "mcp-config" => {
+            let c = McpConfigCli::parse_from(&argv);
+            dispatch(cli_from(
+                EngagementOpts::default(),
+                Command::McpConfig {
+                    ssh: c.ssh,
+                    port: c.port,
+                    remote_path: c.remote_path,
+                    identity: c.identity,
+                },
+            ))
+            .await?
+        }
+        "deploy" => {
+            let c = DeployCli::parse_from(&argv);
+            dispatch(cli_from(
+                EngagementOpts::default(),
+                Command::Deploy(c.args),
+            ))
+            .await?
+        }
+        "cve" => {
+            let c = CveCli::parse_from(&argv);
+            dispatch_cve(c.command).await?;
+            true
+        }
+        _ => return Ok(false),
+    };
+    Ok(handled)
+}
+
 /// Returns true if dispatching consumed the run (CLI mode); false to fall through to TUI.
 pub async fn dispatch(cli: Cli) -> Result<bool> {
     let cmd = match cli.command {
@@ -409,10 +895,7 @@ pub async fn dispatch(cli: Cli) -> Result<bool> {
 
     crate::builtin::ensure_user_dir().context("ensure user templates")?;
 
-    let root = cli
-        .root
-        .clone()
-        .unwrap_or_else(config::engagements_root);
+    let root = cli.opts.engagements_root();
 
     match cmd {
         Command::Tui => Ok(false),
@@ -463,7 +946,7 @@ alias chronosphere='{bin}'
         }
         Command::McpServe => {
             let opts = crate::mcp::ServerOpts {
-                engagement: cli.engagement.clone(),
+                engagement: cli.opts.engagement.clone(),
                 root: root.clone(),
             };
             crate::mcp::serve(opts).await.context("mcp serve")?;
@@ -497,7 +980,7 @@ alias chronosphere='{bin}'
             Ok(true)
         }
         Command::Variables(c) => {
-            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            let mut e = open_engagement(&root, cli.opts.engagement.as_deref())?;
             let sources = library_sources(&root, Some(&e.meta.name))?;
             let lib = load_library(&sources)?;
             match c {
@@ -518,7 +1001,7 @@ alias chronosphere='{bin}'
             Ok(true)
         }
         Command::Doctor { missing } => {
-            let sources = library_sources(root.as_path(), cli.engagement.as_deref())?;
+            let sources = library_sources(root.as_path(), cli.opts.engagement.as_deref())?;
             let lib = load_library(&sources)?;
             let tools = lib.all_tools_referenced();
             let mut found = 0usize;
@@ -545,7 +1028,7 @@ alias chronosphere='{bin}'
             Ok(true)
         }
         Command::List(args) => {
-            let sources = library_sources(root.as_path(), cli.engagement.as_deref())?;
+            let sources = library_sources(root.as_path(), cli.opts.engagement.as_deref())?;
             let lib = load_library(&sources)?;
             match args.kind {
                 ListKind::Engagements => {
@@ -577,7 +1060,7 @@ alias chronosphere='{bin}'
                     }
                 }
                 ListKind::Jobs => {
-                    let e = open_engagement(&root, cli.engagement.as_deref())?;
+                    let e = open_engagement(&root, cli.opts.engagement.as_deref())?;
                     for job in e.history.recent.iter().rev() {
                         println!(
                             "{} {:?}  {}  ({}/{})",
@@ -593,7 +1076,7 @@ alias chronosphere='{bin}'
             Ok(true)
         }
         Command::Search { query } => {
-            let sources = library_sources(root.as_path(), cli.engagement.as_deref())?;
+            let sources = library_sources(root.as_path(), cli.opts.engagement.as_deref())?;
             let lib = load_library(&sources)?;
             let needle = query.to_lowercase();
             for cat in &lib.categories {
@@ -616,10 +1099,10 @@ alias chronosphere='{bin}'
         Command::Show { id, vars } | Command::Render { id, vars } => {
             let resolved = resolve(
                 &root,
-                cli.engagement.as_deref(),
-                &cli.target,
-                &cli.ap,
-                &cli.creds,
+                cli.opts.engagement.as_deref(),
+                &cli.opts.target,
+                &cli.opts.ap,
+                &cli.opts.creds,
                 &id,
                 &vars,
             )?;
@@ -628,14 +1111,14 @@ alias chronosphere='{bin}'
         }
         Command::Yank { id, raw } => {
             let text = if raw {
-                raw_template(&root, cli.engagement.as_deref(), &id)?
+                raw_template(&root, cli.opts.engagement.as_deref(), &id)?
             } else {
                 resolve(
                     &root,
-                    cli.engagement.as_deref(),
-                    &cli.target,
-                    &cli.ap,
-                    &cli.creds,
+                    cli.opts.engagement.as_deref(),
+                    &cli.opts.target,
+                    &cli.opts.ap,
+                    &cli.opts.creds,
                     &id,
                     &[],
                 )?
@@ -651,10 +1134,10 @@ alias chronosphere='{bin}'
         Command::Run { id, vars, dry_run } => {
             let resolved = resolve(
                 &root,
-                cli.engagement.as_deref(),
-                &cli.target,
-                &cli.ap,
-                &cli.creds,
+                cli.opts.engagement.as_deref(),
+                &cli.opts.target,
+                &cli.opts.ap,
+                &cli.opts.creds,
                 &id,
                 &vars,
             )?;
@@ -662,11 +1145,11 @@ alias chronosphere='{bin}'
                 println!("{}", resolved);
                 return Ok(true);
             }
-            run_with_history(&root, cli.engagement.as_deref(), &id, &resolved).await?;
+            run_with_history(&root, cli.opts.engagement.as_deref(), &id, &resolved).await?;
             Ok(true)
         }
         Command::Targets(c) => {
-            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            let mut e = open_engagement(&root, cli.opts.engagement.as_deref())?;
             match c {
                 TargetCmd::List => {
                     let active = e.targets.active().map(|t| t.name.clone());
@@ -710,7 +1193,7 @@ alias chronosphere='{bin}'
             Ok(true)
         }
         Command::Aps(c) => {
-            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            let mut e = open_engagement(&root, cli.opts.engagement.as_deref())?;
             match c {
                 ApCmd::List => {
                     let active = e.aps.active().map(|a| a.name.clone());
@@ -772,7 +1255,7 @@ alias chronosphere='{bin}'
             Ok(true)
         }
         Command::Pivots(c) => {
-            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            let mut e = open_engagement(&root, cli.opts.engagement.as_deref())?;
             match c {
                 PivotCmd::List => {
                     let tun = e.pivots.active_tunnel.clone();
@@ -900,7 +1383,7 @@ alias chronosphere='{bin}'
             Ok(true)
         }
         Command::Creds(c) => {
-            let mut e = open_engagement(&root, cli.engagement.as_deref())?;
+            let mut e = open_engagement(&root, cli.opts.engagement.as_deref())?;
             match c {
                 CredsCmd::List => {
                     let active = e.profiles.active().map(|p| p.name.clone());

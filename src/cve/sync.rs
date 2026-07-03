@@ -45,7 +45,7 @@ pub async fn sync(options: SyncOptions) -> Result<SyncResult> {
                 result.added += a;
                 result.updated += u;
             }
-            Err(e) => result.errors.push(format!("nvd: {e}")),
+            Err(e) => result.errors.push(format!("NVD sync failed: {e:#}")),
         }
     }
 
@@ -139,8 +139,15 @@ async fn sync_nvd(
 
     let mut added = 0u64;
     let mut updated = 0u64;
+    let full = options.full || !options.years.is_empty();
 
-    if options.full {
+    if !options.years.is_empty() && !options.full && options.progress {
+        eprintln!(
+            "cve sync: --years implies --full (downloading year feeds, not modified/recent only)"
+        );
+    }
+
+    if full {
         let years = if options.years.is_empty() {
             cfg.sync.default_years.clone()
         } else {

@@ -20,8 +20,7 @@ pub struct NvdFeedMeta {
 
 pub async fn fetch_feed_meta(client: &HttpClient, feed_name: &str) -> Result<NvdFeedMeta> {
     let url = format!("{NVD_FEED_BASE}/{feed_name}.meta");
-    let resp = client.get("nvd", &url).await?;
-    let text = resp.text().await?;
+    let text = client.get_text("nvd", &url).await?;
     let mut sha256 = String::new();
     let mut last_modified = None;
     for line in text.lines() {
@@ -51,8 +50,7 @@ pub async fn download_and_import_feed(
 
     let url = format!("{NVD_FEED_BASE}/{feed_name}.json.gz");
     tracing::info!(feed = feed_name, "downloading");
-    let resp = client.get("nvd", &url).await?;
-    let bytes = resp.bytes().await?;
+    let bytes = client.get_bytes("nvd", &url).await?;
     let mut decoder = GzDecoder::new(&bytes[..]);
     let mut json = String::new();
     decoder.read_to_string(&mut json)?;
@@ -239,12 +237,11 @@ pub async fn fetch_single_cve(
     api_key: Option<&str>,
 ) -> Result<bool> {
     let url = format!("{NVD_API_BASE}?cveId={cve_id}");
-    let resp = if let Some(key) = api_key {
-        client.get_with_api_key("nvd", &url, key).await?
+    let text = if let Some(key) = api_key {
+        client.get_text_with_api_key("nvd", &url, key).await?
     } else {
-        client.get("nvd", &url).await?
+        client.get_text("nvd", &url).await?
     };
-    let text = resp.text().await?;
     let (added, updated) = import_nvd_json_stats(store, &text)?;
     Ok(added + updated > 0)
 }
@@ -316,13 +313,13 @@ pub async fn sync_by_month(
             }
         }
         let url = build_month_api_url(&start, &end, by_modified, start_index, RESULTS_PER_PAGE);
-        let resp = if let Some(key) = api_key {
-            client.get_with_api_key("nvd", &url, key).await?
+        let text = if let Some(key) = api_key {
+            client.get_text_with_api_key("nvd", &url, key).await?
         } else {
-            client.get("nvd", &url).await?
+            client.get_text("nvd", &url).await?
         };
-        let text = resp.text().await?;
-        let root: Value = serde_json::from_str(&text).context("parse nvd api response")?;
+        let root: Value = serde_json::from_str(&text)
+            .with_context(|| format!("parse NVD API JSON for {label} ({field}) page {page}"))?;
         if start_index == 0 {
             total_results = root.get("totalResults").and_then(|v| v.as_u64()).unwrap_or(0);
             tracing::info!(total = total_results, "NVD CVE count for month range");

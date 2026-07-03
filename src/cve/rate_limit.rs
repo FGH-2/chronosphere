@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER, USER_AGENT, ACCEPT_ENCODING};
 use reqwest::{Client, Response, StatusCode};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -127,7 +127,7 @@ impl HttpClient {
     }
 
     pub async fn get(&self, provider: &str, url: &str) -> Result<Response> {
-        self.execute(provider, || self.inner.get(url)).await
+        self.execute(provider, url, || self.inner.get(url)).await
     }
 
     pub async fn get_with_api_key(
@@ -136,11 +136,98 @@ impl HttpClient {
         url: &str,
         api_key: &str,
     ) -> Result<Response> {
-        self.execute(provider, || self.inner.get(url).header("apiKey", api_key))
+        self.execute(provider, url, || self.inner.get(url).header("apiKey", api_key))
             .await
     }
 
-    async fn execute<F>(&self, provider: &str, build: F) -> Result<Response>
+    /// Read a successful HTTP response body as text, with a proxy-safe identity-encoding retry.
+    pub async fn read_text(
+        &self,
+        provider: &str,
+        url: &str,
+        resp: Response,
+        api_key: Option<&str>,
+    ) -> Result<String> {
+        let status = resp.status();
+        match resp.text().await {
+            Ok(text) => Ok(text),
+            Err(first) => {
+                tracing::warn!(url, error = %first, "response body decode failed, retrying without compression");
+                let resp = self
+                    .execute(provider, url, || {
+                        let req = self.inner.get(url).header(ACCEPT_ENCODING, "identity");
+                        if let Some(key) = api_key {
+                            req.header("apiKey", key)
+                        } else {
+                            req
+                        }
+                    })
+                    .await?;
+                resp.text().await.with_context(|| {
+                    format!(
+                        "read response body from {url} (HTTP {status}) after decode error: {first}. \
+                         This usually means a truncated or garbled response through a proxy — not NVD rate limiting \
+                         (429 responses are retried automatically). Try without proxychains or set NVD_API_KEY."
+                    )
+                })
+            }
+        }
+    }
+
+    /// GET and return the response body as text.
+    pub async fn get_text(&self, provider: &str, url: &str) -> Result<String> {
+        let resp = self.get(provider, url).await?;
+        self.read_text(provider, url, resp, None).await
+    }
+
+    /// GET with an API key and return the response body as text.
+    pub async fn get_text_with_api_key(
+        &self,
+        provider: &str,
+        url: &str,
+        api_key: &str,
+    ) -> Result<String> {
+        let resp = self.get_with_api_key(provider, url, api_key).await?;
+        self.read_text(provider, url, resp, Some(api_key)).await
+    }
+
+    /// GET and return the response body as bytes (for gzip feeds).
+    pub async fn get_bytes(&self, provider: &str, url: &str) -> Result<Vec<u8>> {
+        let resp = self.get(provider, url).await?;
+        self.read_bytes(provider, url, resp).await
+    }
+
+    /// Read a successful HTTP response body as bytes, with an identity-encoding retry.
+    pub async fn read_bytes(
+        &self,
+        provider: &str,
+        url: &str,
+        resp: Response,
+    ) -> Result<Vec<u8>> {
+        let status = resp.status();
+        match resp.bytes().await {
+            Ok(bytes) => Ok(bytes.to_vec()),
+            Err(first) => {
+                tracing::warn!(url, error = %first, "response body decode failed, retrying without compression");
+                let resp = self
+                    .execute(provider, url, || {
+                        self.inner
+                            .get(url)
+                            .header(ACCEPT_ENCODING, "identity")
+                    })
+                    .await?;
+                let bytes = resp.bytes().await.with_context(|| {
+                    format!(
+                        "read response body from {url} (HTTP {status}) after decode error: {first}. \
+                         This usually means a truncated or garbled response through a proxy."
+                    )
+                })?;
+                Ok(bytes.to_vec())
+            }
+        }
+    }
+
+    async fn execute<F>(&self, provider: &str, url: &str, build: F) -> Result<Response>
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
@@ -148,7 +235,10 @@ impl HttpClient {
         loop {
             self.wait_for_slot(provider).await;
             self.mark_request(provider).await;
-            let resp = build().send().await.context("http request")?;
+            let resp = build()
+                .send()
+                .await
+                .with_context(|| format!("{provider}: request to {url}"))?;
 
             let status = resp.status();
             if status.is_success() {
@@ -158,7 +248,10 @@ impl HttpClient {
             if status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::SERVICE_UNAVAILABLE {
                 attempt += 1;
                 if attempt >= MAX_RETRIES {
-                    bail!("{provider}: rate limited after {MAX_RETRIES} retries ({status})");
+                    bail!(
+                        "{provider}: rate limited after {MAX_RETRIES} retries (HTTP {status}) for {url}. \
+                         Set NVD_API_KEY or wait before retrying."
+                    );
                 }
                 let retry_secs = resp
                     .headers()
@@ -166,15 +259,42 @@ impl HttpClient {
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap_or(DEFAULT_RETRY_AFTER_SECS);
-                tracing::warn!(provider, attempt, retry_secs, "rate limited, backing off");
+                tracing::warn!(provider, attempt, retry_secs, url, "rate limited, backing off");
                 self.set_backoff(provider, Duration::from_secs(retry_secs)).await;
                 sleep(Duration::from_secs(retry_secs)).await;
                 continue;
             }
 
             let body = resp.text().await.unwrap_or_default();
-            bail!("{provider}: HTTP {status}: {body}");
+            let body_hint = truncate_body_hint(&body);
+            let hint = http_error_hint(status, url);
+            bail!("HTTP {status} for {url}{body_hint}{hint}");
         }
+    }
+}
+
+fn truncate_body_hint(body: &str) -> String {
+    let trimmed: String = body.chars().filter(|c| !c.is_control()).take(200).collect();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!(": {trimmed}")
+    }
+}
+
+fn http_error_hint(status: StatusCode, url: &str) -> &'static str {
+    match status {
+        StatusCode::NOT_FOUND => {
+            if url.contains("/feeds/json/cve/") {
+                " (feed file not found — check the feed name; year feeds require `cve sync --full --years YYYY`)"
+            } else {
+                " (resource not found)"
+            }
+        }
+        StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS => {
+            " (likely rate limited — set NVD_API_KEY)"
+        }
+        _ => "",
     }
 }
 
