@@ -1,15 +1,103 @@
 use crate::app::{App, CveModal, Modal};
 use crate::ui::centered_rect;
+use crate::ui::layout::{ListRegion, ScrollRegion};
 use crate::ui::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn max_detail_scroll(modal: &CveModal, visible_lines: usize) -> usize {
+    detail_line_count(modal).saturating_sub(visible_lines.max(1))
+}
+
+pub fn clamp_detail_scroll(modal: &mut CveModal, visible_lines: usize) {
+    modal.detail_scroll = modal
+        .detail_scroll
+        .min(max_detail_scroll(modal, visible_lines));
+}
+
+fn detail_line_count(modal: &CveModal) -> usize {
+    build_detail_lines(modal).len()
+}
+
+fn build_detail_lines(modal: &CveModal) -> Vec<Line<'static>> {
+    let rec = match modal.results.get(modal.cursor) {
+        Some(r) => r,
+        None => return vec![Line::from("No selection")],
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(rec.id.clone(), Theme::accent_bold())));
+    if let Some(s) = &rec.severity {
+        let cvss = rec
+            .cvss_v31
+            .map(|v| format!(" CVSS {v:.1}"))
+            .unwrap_or_default();
+        lines.push(Line::from(format!("{s}{cvss}")));
+    }
+    if rec.in_kev {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "KEV added {} due {}",
+                rec.kev_date_added.as_deref().unwrap_or("-"),
+                rec.kev_due_date.as_deref().unwrap_or("-"),
+            ),
+            Theme::warn(),
+        )));
+    }
+    if let Some(e) = rec.epss_score {
+        lines.push(Line::from(format!(
+            "EPSS {:.4} (p{:.1}%)",
+            e,
+            rec.epss_percentile.unwrap_or(0.0) * 100.0
+        )));
+    }
+    if !rec.products.is_empty() {
+        let prods: String = rec
+            .products
+            .iter()
+            .take(6)
+            .map(|p| format!("{}/{}", p.vendor, p.product))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(Line::from(format!("Products: {prods}")));
+    }
+    if !rec.cwes.is_empty() {
+        lines.push(Line::from(format!("CWEs: {}", rec.cwes.join(", "))));
+    }
+    lines.push(Line::from(""));
+    for line in rec.description.lines() {
+        lines.push(Line::from(line.to_string()));
+    }
+    if !rec.references.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("References:", Theme::muted())));
+        for r in rec.references.iter().take(8) {
+            lines.push(Line::from(format!("  {}", r.url)));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Esc back  j/k/wheel scroll  y yank id",
+        Theme::muted(),
+    )));
+    lines
+}
+
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    list_hit: &mut Option<ListRegion>,
+    detail_scroll_hit: &mut Option<ScrollRegion>,
+) {
     let Modal::Cve(modal) = &app.modal else {
         return;
     };
+
+    *list_hit = None;
+    *detail_scroll_hit = None;
 
     let r = centered_rect(area, 90, 85);
     f.render_widget(Clear, r);
@@ -28,6 +116,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(r);
 
     if modal.detail {
+        let visible_lines = inner.height.max(1) as usize;
+        *detail_scroll_hit = Some(ScrollRegion {
+            area: inner,
+            visible_lines,
+        });
         render_detail(f, inner, modal);
         return;
     }
@@ -67,7 +160,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     );
 
     let chips = format!(
-        "{}  {} shown  j/k move  Enter detail  y yank  s sync  K KEV{}  Esc close",
+        "{}  {} shown  j/k/wheel move  Enter detail  y yank  s sync  K KEV{}  Esc close",
         if modal.kev_only { "[KEV]" } else { "[all]" },
         modal.results.len(),
         if modal.kev_only { "✓" } else { "" },
@@ -104,6 +197,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(Theme::selected())
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, layout[3], &mut state);
+    *list_hit = Some(ListRegion {
+        panel: layout[3],
+        list_inner: layout[3],
+        list_offset: state.offset(),
+    });
 
     let hint = if modal.results.is_empty() {
         "No matches — run :cve then press s to sync, or type to search"
@@ -114,68 +212,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_detail(f: &mut Frame, area: Rect, modal: &CveModal) {
-    let rec = modal.results.get(modal.cursor);
-    let Some(rec) = rec else {
-        f.render_widget(Paragraph::new("No selection"), area);
-        return;
-    };
+    let visible_lines = area.height.max(1) as usize;
+    let scroll = modal
+        .detail_scroll
+        .min(max_detail_scroll(modal, visible_lines));
 
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(&rec.id, Theme::accent_bold())));
-    if let Some(s) = &rec.severity {
-        let cvss = rec
-            .cvss_v31
-            .map(|v| format!(" CVSS {v:.1}"))
-            .unwrap_or_default();
-        lines.push(Line::from(format!("{s}{cvss}")));
-    }
-    if rec.in_kev {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "KEV added {} due {}",
-                rec.kev_date_added.as_deref().unwrap_or("-"),
-                rec.kev_due_date.as_deref().unwrap_or("-"),
-            ),
-            Theme::warn(),
-        )));
-    }
-    if let Some(e) = rec.epss_score {
-        lines.push(Line::from(format!(
-            "EPSS {:.4} (p{:.1}%)",
-            e,
-            rec.epss_percentile.unwrap_or(0.0) * 100.0
-        )));
-    }
-    if !rec.products.is_empty() {
-        let prods: String = rec
-            .products
-            .iter()
-            .take(6)
-            .map(|p| format!("{}/{}", p.vendor, p.product))
-            .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(Line::from(format!("Products: {prods}")));
-    }
-    if !rec.cwes.is_empty() {
-        lines.push(Line::from(format!("CWEs: {}", rec.cwes.join(", "))));
-    }
-    lines.push(Line::from(""));
-    for line in rec.description.lines().take(12) {
-        lines.push(Line::from(line.to_string()));
-    }
-    if !rec.references.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("References:", Theme::muted())));
-        for r in rec.references.iter().take(5) {
-            lines.push(Line::from(format!("  {}", r.url)));
-        }
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Esc back  y yank id",
-        Theme::muted(),
-    )));
-
-    let para = Paragraph::new(lines).wrap(Wrap { trim: true });
+    let lines = build_detail_lines(modal);
+    let para = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .scroll((scroll as u16, 0));
     f.render_widget(para, area);
 }

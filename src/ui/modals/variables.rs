@@ -1,12 +1,13 @@
 use crate::app::{App, Modal, VariableEditField, VariablesModalState};
 use crate::ui::centered_rect;
+use crate::ui::layout::ListRegion;
 use crate::ui::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &App, list_hit: &mut Option<ListRegion>) {
     let r = centered_rect(area, 75, 75);
     f.render_widget(Clear, r);
     let block = Block::default()
@@ -26,17 +27,27 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         VariablesModalState::List {
             cursor,
             unset_only,
-        } => render_list(f, inner, app, *cursor, *unset_only),
+        } => render_list(f, inner, app, *cursor, *unset_only, list_hit),
         VariablesModalState::Edit {
             name,
             value,
             focused,
             name_editable,
-        } => render_edit(f, inner, name, value, *focused, *name_editable),
+        } => {
+            *list_hit = None;
+            render_edit(f, inner, name, value, *focused, *name_editable);
+        }
     }
 }
 
-fn render_list(f: &mut Frame, area: Rect, app: &App, cursor: usize, unset_only: bool) {
+fn render_list(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    cursor: usize,
+    unset_only: bool,
+    list_hit: &mut Option<ListRegion>,
+) {
     let rows = app.variable_rows(unset_only);
     let (set_n, unset_n) = app.variable_counts();
 
@@ -102,6 +113,11 @@ fn render_list(f: &mut Frame, area: Rect, app: &App, cursor: usize, unset_only: 
         .highlight_style(Theme::selected())
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, layout[1], &mut state);
+    *list_hit = Some(ListRegion {
+        panel: layout[1],
+        list_inner: layout[1],
+        list_offset: state.offset(),
+    });
 
     let current_need = app.current_command_unresolved_vars();
     let need_line = if current_need.is_empty() {

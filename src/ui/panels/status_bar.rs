@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::ui::layout::{StatusBarAction, StatusBarHits, StatusChipHit};
 use crate::ui::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -6,13 +7,32 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &App, hits: &mut StatusBarHits) {
+    hits.bar = area;
+    hits.chips.clear();
+    let mut x = area.x;
+
+    let mut advance = |hits: &mut StatusBarHits, x: &mut u16, text: &str, action: Option<StatusBarAction>| {
+        let w = text.len() as u16;
+        if w > 0 {
+            if let Some(action) = action {
+                hits.chips.push(StatusChipHit {
+                    area: Rect::new(*x, area.y, w, area.height.max(1)),
+                    action,
+                });
+            }
+        }
+        *x = x.saturating_add(w);
+    };
+
     let mode = app.mode.label();
     let mode_style = match app.mode {
         crate::vim::Mode::Normal => Theme::accent_bold(),
         crate::vim::Mode::Insert => Theme::success().add_modifier(Modifier::BOLD),
         crate::vim::Mode::Command => Theme::magenta().add_modifier(Modifier::BOLD),
-        crate::vim::Mode::Search | crate::vim::Mode::SearchGlobal => Theme::warn().add_modifier(Modifier::BOLD),
+        crate::vim::Mode::Search | crate::vim::Mode::SearchGlobal => {
+            Theme::warn().add_modifier(Modifier::BOLD)
+        }
     };
 
     let engagement = app
@@ -92,6 +112,21 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         _ => String::new(),
     };
 
+    // Track clickable chip regions (mode label is not clickable).
+    advance(hits, &mut x, &format!(" {} ", mode), None);
+    advance(hits, &mut x, "│ ", None);
+    advance(hits, &mut x, &engagement, Some(StatusBarAction::Engagement));
+    advance(hits, &mut x, " │ ", None);
+    advance(hits, &mut x, &target, Some(StatusBarAction::Target));
+    advance(hits, &mut x, " │ ", None);
+    advance(hits, &mut x, &ap, Some(StatusBarAction::Ap));
+    advance(hits, &mut x, " │ ", None);
+    advance(hits, &mut x, &pivot, Some(StatusBarAction::Pivot));
+    advance(hits, &mut x, " │ ", None);
+    advance(hits, &mut x, &profile, Some(StatusBarAction::Creds));
+    advance(hits, &mut x, " │ ", None);
+    advance(hits, &mut x, &jobs, Some(StatusBarAction::Jobs));
+
     let mut spans = vec![
         Span::styled(format!(" {} ", mode), mode_style),
         Span::raw("│ "),
@@ -109,11 +144,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     ];
 
     if !prefix.is_empty() {
+        advance(hits, &mut x, " │ ", None);
+        advance(hits, &mut x, &prefix, None);
         spans.push(Span::raw(" │ "));
         spans.push(Span::styled(prefix, Theme::warn().add_modifier(Modifier::BOLD)));
     }
 
     if let Some(msg) = &app.flash {
+        let flash_text = format!(" │ {}", msg.text);
+        advance(hits, &mut x, &flash_text, None);
         spans.push(Span::raw(" │ "));
         let style = if msg.is_error {
             Theme::error()

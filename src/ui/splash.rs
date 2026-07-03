@@ -245,6 +245,8 @@ fn draw_hint(f: &mut Frame, area: Rect) {
     let hint = Line::from(vec![
         Span::styled("press ", Theme::muted()),
         Span::styled("any key", Theme::accent_bold()),
+        Span::styled(" or ", Theme::muted()),
+        Span::styled("click", Theme::accent_bold()),
         Span::styled(" to enter   ·   ", Theme::muted()),
         Span::styled("?", Theme::accent_bold()),
         Span::styled(" for help   ·   ", Theme::muted()),

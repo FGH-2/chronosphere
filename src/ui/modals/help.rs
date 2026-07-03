@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 const HELP: &[(&str, &str)] = &[
     ("h / l", "focus left / right panel"),
-    ("j / k", "move down / up"),
+    ("j / k", "move down / up (preview: scroll)"),
     ("gg / G", "top / bottom"),
     ("Ctrl-d / Ctrl-u", "half-page down / up"),
     ("Enter / r", "run highlighted command in background tmux window"),
@@ -29,6 +29,13 @@ const HELP: &[(&str, &str)] = &[
     (":", "command palette"),
     ("? / :help", "show this help"),
     ("Esc / Ctrl-c", "clear selection / dismiss modal"),
+    ("click", "focus panel / select list row"),
+    ("double-click", "run command / open job log / activate modal row"),
+    ("Shift+click", "toggle multi-select (commands panel)"),
+    ("wheel", "scroll preview / lists / modals"),
+    ("click outside modal", "dismiss modal (same as Esc)"),
+    ("status bar click", "open engagement/target/ap/pivot/creds; jobs → focus"),
+    ("edit modal click", "place cursor; wheel scroll; dbl-click path pick"),
     ("q / :q", "quit"),
     ("", ""),
     ("job log (floating)", "j/k scroll  Ctrl-d/u page  g/G top/bottom  f follow  o tmux"),
@@ -85,7 +92,7 @@ fn help_lines() -> Vec<Line<'static>> {
     lines
 }
 
-pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
+pub fn render(f: &mut Frame, area: Rect, app: &mut App, scroll_hit: &mut Option<crate::ui::layout::ScrollRegion>) {
     let Modal::Help(modal) = &mut app.modal else {
         return;
     };
@@ -108,6 +115,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     let visible_lines = layout[0].height.max(1) as usize;
     modal.last_visible_lines = visible_lines;
     clamp_scroll(modal, visible_lines);
+    *scroll_hit = Some(crate::ui::layout::ScrollRegion {
+        area: layout[0],
+        visible_lines,
+    });
 
     let lines = help_lines();
     let p = Paragraph::new(lines)
@@ -127,6 +138,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
         Span::raw(" top/bottom  "),
         Span::styled("Esc/?", Theme::magenta()),
         Span::raw(" close  "),
+        Span::styled("wheel", Theme::magenta()),
+        Span::raw(" scroll  "),
         Span::styled(position, Theme::muted().add_modifier(Modifier::ITALIC)),
     ]);
     f.render_widget(Paragraph::new(hints).style(Theme::muted()), layout[1]);
