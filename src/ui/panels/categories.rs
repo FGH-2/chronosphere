@@ -1,4 +1,5 @@
 use crate::app::{App, Focus};
+use crate::ui::layout::ListRegion;
 use crate::ui::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -6,7 +7,9 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &App, hit: &mut ListRegion) {
+    hit.panel = area;
+    hit.list_inner = ListRegion::block_inner(area);
     let is_focused = app.focus == Focus::Categories;
     let border_style = if is_focused { Theme::border_active() } else { Theme::border() };
     let block = Block::default()
@@ -46,4 +49,5 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(Theme::selected())
         .highlight_symbol(if is_focused { "▶ " } else { "  " });
     f.render_stateful_widget(list, area, &mut state);
+    hit.list_offset = state.offset();
 }

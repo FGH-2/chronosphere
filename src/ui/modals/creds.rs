@@ -1,12 +1,13 @@
 use crate::app::{App, CredEditField, CredsModal, CredsModalState, Modal};
 use crate::ui::centered_rect;
+use crate::ui::layout::ListRegion;
 use crate::ui::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &App, list_hit: &mut Option<ListRegion>) {
     let r = centered_rect(area, 70, 70);
     f.render_widget(Clear, r);
     let block = Block::default()
@@ -23,12 +24,22 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     };
 
     match &modal.state {
-        CredsModalState::List { cursor } => render_list(f, inner, app, modal, *cursor),
-        CredsModalState::Edit { fields, focused, .. } => render_edit(f, inner, fields, *focused),
+        CredsModalState::List { cursor } => render_list(f, inner, app, modal, *cursor, list_hit),
+        CredsModalState::Edit { fields, focused, .. } => {
+            *list_hit = None;
+            render_edit(f, inner, fields, *focused);
+        }
     }
 }
 
-fn render_list(f: &mut Frame, area: Rect, app: &App, _modal: &CredsModal, cursor: usize) {
+fn render_list(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    _modal: &CredsModal,
+    cursor: usize,
+    list_hit: &mut Option<ListRegion>,
+) {
     let items: Vec<ListItem> = app
         .engagement
         .as_ref()
@@ -89,6 +100,11 @@ fn render_list(f: &mut Frame, area: Rect, app: &App, _modal: &CredsModal, cursor
         .highlight_style(Theme::selected())
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, layout[0], &mut state);
+    *list_hit = Some(ListRegion {
+        panel: layout[0],
+        list_inner: layout[0],
+        list_offset: state.offset(),
+    });
 
     let hints = Paragraph::new(Line::from(vec![
         Span::styled("a", Theme::magenta()),

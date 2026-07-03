@@ -1,12 +1,13 @@
 use crate::app::{App, Modal, PivotEditField, PivotModalState};
 use crate::ui::centered_rect;
+use crate::ui::layout::ListRegion;
 use crate::ui::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &App, list_hit: &mut Option<ListRegion>) {
     let r = centered_rect(area, 80, 78);
     f.render_widget(Clear, r);
     let block = Block::default()
@@ -23,12 +24,21 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     };
 
     match &modal.state {
-        PivotModalState::List { cursor } => render_list(f, inner, app, *cursor),
-        PivotModalState::Edit { fields, focused, .. } => render_edit(f, inner, fields, *focused),
+        PivotModalState::List { cursor } => render_list(f, inner, app, *cursor, list_hit),
+        PivotModalState::Edit { fields, focused, .. } => {
+            *list_hit = None;
+            render_edit(f, inner, fields, *focused);
+        }
     }
 }
 
-fn render_list(f: &mut Frame, area: Rect, app: &App, cursor: usize) {
+fn render_list(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    cursor: usize,
+    list_hit: &mut Option<ListRegion>,
+) {
     let eng = app.engagement.as_ref();
     let active_tunnel = eng.and_then(|e| e.pivots.active_tunnel.clone());
     let active_remote = eng.and_then(|e| e.pivots.active_remote.clone());
@@ -90,6 +100,11 @@ fn render_list(f: &mut Frame, area: Rect, app: &App, cursor: usize) {
         .highlight_style(Theme::selected())
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, layout[0], &mut state);
+    *list_hit = Some(ListRegion {
+        panel: layout[0],
+        list_inner: layout[0],
+        list_offset: state.offset(),
+    });
 
     let hints = Paragraph::new(vec![
         Line::from(vec![

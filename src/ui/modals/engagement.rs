@@ -1,12 +1,13 @@
 use crate::app::{App, EngagementModal, Modal};
 use crate::ui::centered_rect;
+use crate::ui::layout::ListRegion;
 use crate::ui::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &App, list_hit: &mut Option<ListRegion>) {
     let r = centered_rect(area, 60, 60);
     f.render_widget(Clear, r);
     let block = Block::default()
@@ -36,6 +37,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         ])
         .block(block);
         f.render_widget(p, r);
+        *list_hit = None;
         return;
     }
 
@@ -71,6 +73,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(Theme::selected())
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, r, &mut state);
+    *list_hit = Some(ListRegion {
+        panel: r,
+        list_inner: ListRegion::block_inner(r),
+        list_offset: state.offset(),
+    });
 
     let _ = EngagementModal::default;
 }

@@ -175,7 +175,12 @@ fn normalize_display_line(s: &str) -> String {
     }
 }
 
-pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    app: &mut App,
+    scroll_hit: &mut Option<crate::ui::layout::ScrollRegion>,
+) {
     let Modal::JobLog(modal) = &mut app.modal else {
         return;
     };
@@ -229,6 +234,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
         refresh_modal_from_job(modal, job);
     }
     clamp_scroll(modal, visible_lines);
+    *scroll_hit = Some(crate::ui::layout::ScrollRegion {
+        area: layout[0],
+        visible_lines,
+    });
 
     let width = layout[0].width.max(1) as usize;
     let body: Vec<Line> = modal
@@ -267,6 +276,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
         Span::raw(" top/bottom  "),
         Span::styled("f", Theme::magenta()),
         Span::raw(" follow  "),
+        Span::styled("wheel", Theme::magenta()),
+        Span::raw(" scroll  "),
         Span::styled("o", Theme::magenta()),
         Span::raw(" tmux  "),
         Span::styled("Esc", Theme::magenta()),

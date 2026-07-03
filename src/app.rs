@@ -9,13 +9,14 @@ use crate::input::{apply_to_string, apply_to_textarea, text_edit_action, TextEdi
 use crate::library::{CategoryFile, CommandEntry, CommandLibrary, CommandVariant};
 use crate::render::{self, RenderContext};
 use crate::ui::{self, splash::SplashState};
+use crate::ui::layout::{scroll_by, HitRegions, StatusBarAction};
 use crate::vim::{Action, KeyParser, Mode};
 
 use anyhow::{Context, Result};
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyboardEnhancementFlags,
-    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -25,6 +26,7 @@ use futures::StreamExt;
 use nucleo_matcher::{Matcher, Utf32Str, pattern::Pattern};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Position;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{Stdout, stdout};
@@ -389,6 +391,7 @@ pub struct CveModal {
     pub results: Vec<crate::cve::CveRecord>,
     pub cursor: usize,
     pub detail: bool,
+    pub detail_scroll: usize,
     pub kev_only: bool,
     pub syncing: bool,
     pub db_total: u64,
@@ -429,6 +432,8 @@ pub struct EditModal {
     /// Tab-completion candidates for the current path token.
     pub path_suggestions: Vec<String>,
     pub path_pick: usize,
+    /// Viewport scroll top (row, col) mirrored from tui-textarea each frame.
+    pub textarea_scroll: (u16, u16),
 }
 
 #[derive(Debug, Clone)]
@@ -470,6 +475,8 @@ pub struct App {
     pub selected_category: usize,
     pub selected_command: usize,
     pub selected_job: usize,
+    pub preview_scroll: usize,
+    pub preview_visible_lines: usize,
     pub multi_selected: HashSet<(String, String)>,
     pub marks: BTreeMap<char, (String, String)>,
     pub last_action: Option<Action>,
@@ -495,6 +502,33 @@ pub struct App {
     pub cve_sync_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Result<crate::cve::SyncResult>>>,
     /// Engagement directory root (`--root` or default XDG path).
     engagements_root: PathBuf,
+
+    /// Last-frame panel bounds for mouse hit-testing.
+    pub hit: HitRegions,
+
+    /// Tracks the previous click for double-click detection.
+    last_mouse_click: Option<LastMouseClick>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MouseClickTarget {
+    Commands { index: usize },
+    Jobs { index: usize },
+    Engagement { index: usize },
+    Target { index: usize },
+    Ap { index: usize },
+    Pivot { index: usize },
+    Creds { index: usize },
+    Variables { index: usize },
+    Search { index: usize },
+    Cve { index: usize },
+    EditSuggestion { index: usize },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LastMouseClick {
+    at: Instant,
+    target: MouseClickTarget,
 }
 
 /// Options from the CLI when launching the TUI (global `-e` / `--root`).
@@ -524,6 +558,8 @@ impl App {
             selected_category: 0,
             selected_command: 0,
             selected_job: 0,
+            preview_scroll: 0,
+            preview_visible_lines: 1,
             multi_selected: HashSet::new(),
             marks: BTreeMap::new(),
             last_action: None,
@@ -541,6 +577,8 @@ impl App {
             cve_sync_rx: None,
             needs_full_redraw: false,
             engagements_root,
+            hit: HitRegions::default(),
+            last_mouse_click: None,
         };
         if let Some(name) = boot.engagement {
             app.try_open_engagement_by_name(&name);
@@ -612,6 +650,9 @@ impl App {
                             }
                             Event::Resize(_, _) => {
                                 self.needs_full_redraw = true;
+                            }
+                            Event::Mouse(me) => {
+                                self.handle_mouse(me);
                             }
                             _ => {}
                         }
@@ -720,6 +761,707 @@ impl App {
             Mode::Search | Mode::SearchGlobal => self.handle_search_mode_key(ke),
             Mode::Insert => self.handle_insert_mode_key(ke),
             Mode::Normal => self.handle_normal_mode_key(ke),
+        }
+    }
+
+    // === mouse handling ==================================================
+
+    const WHEEL_LINES: i32 = 3;
+    const WHEEL_ITEMS: i32 = 1;
+    const DOUBLE_CLICK_MS: u128 = 450;
+
+    fn is_double_click(&mut self, target: MouseClickTarget) -> bool {
+        let now = Instant::now();
+        let is_double = self.last_mouse_click.is_some_and(|prev| {
+            prev.target == target && now.duration_since(prev.at).as_millis() < Self::DOUBLE_CLICK_MS
+        });
+        self.last_mouse_click = Some(LastMouseClick { at: now, target });
+        is_double
+    }
+
+    fn clear_mouse_click(&mut self) {
+        self.last_mouse_click = None;
+    }
+
+    fn handle_mouse(&mut self, me: MouseEvent) {
+        match me.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.handle_mouse_click(me),
+            MouseEventKind::ScrollUp => self.handle_mouse_scroll(me, -1),
+            MouseEventKind::ScrollDown => self.handle_mouse_scroll(me, 1),
+            _ => {}
+        }
+    }
+
+    fn handle_mouse_click(&mut self, me: MouseEvent) {
+        if self.splash.is_some() {
+            self.splash = None;
+            self.key_parser.reset();
+            return;
+        }
+
+        let shift = me.modifiers.contains(KeyModifiers::SHIFT);
+        let col = me.column;
+        let row = me.row;
+
+        if matches!(self.mode, Mode::Normal) && matches!(self.modal, Modal::None) {
+            if let Some(action) = self.hit.status_bar.chip_at(col, row) {
+                self.handle_status_bar_action(action);
+                self.clear_mouse_click();
+                return;
+            }
+        }
+
+        if let Some(popup) = self.hit.modal_popup {
+            let pos = Position { x: col, y: row };
+            if !popup.contains(pos) {
+                self.dismiss_modal_backdrop();
+                return;
+            }
+            if matches!(self.modal, Modal::Edit(_)) {
+                self.handle_edit_modal_click(col, row, shift);
+                return;
+            }
+            self.handle_modal_panel_click(col, row, shift);
+            return;
+        }
+
+        if !matches!(self.mode, Mode::Normal) {
+            return;
+        }
+
+        if !matches!(self.modal, Modal::None) {
+            return;
+        }
+
+        self.handle_main_panel_click(col, row, shift);
+    }
+
+    fn handle_mouse_scroll(&mut self, me: MouseEvent, direction: i32) {
+        if self.splash.is_some() {
+            return;
+        }
+
+        let col = me.column;
+        let row = me.row;
+
+        if let Some(region) = self.hit.job_log_scroll {
+            if region.contains(col, row) {
+                self.scroll_job_log(direction * Self::WHEEL_LINES);
+                return;
+            }
+        }
+        if let Some(region) = self.hit.help_scroll {
+            if region.contains(col, row) {
+                self.scroll_help(direction * Self::WHEEL_LINES);
+                return;
+            }
+        }
+        if let Some(list) = self.hit.search_list {
+            if list.contains_list(col, row) {
+                self.scroll_search_cursor(direction * Self::WHEEL_ITEMS);
+                return;
+            }
+        }
+        if let Some(region) = self.hit.cve_detail_scroll {
+            if region.contains(col, row) {
+                self.scroll_cve_detail(direction * Self::WHEEL_LINES);
+                return;
+            }
+        }
+        if let Some(list) = self.hit.cve_list {
+            if list.contains_list(col, row) {
+                self.scroll_cve_cursor(direction * Self::WHEEL_ITEMS);
+                return;
+            }
+        }
+        if let Some(region) = self.hit.edit.as_ref().map(|e| e.textarea) {
+            if region.contains(col, row) {
+                self.scroll_edit_textarea(direction * Self::WHEEL_LINES);
+                return;
+            }
+        }
+
+        if !matches!(self.modal, Modal::None) || !matches!(self.mode, Mode::Normal) {
+            return;
+        }
+
+        let hit = &self.hit;
+        if hit.categories.contains_list(col, row) {
+            self.focus = Focus::Categories;
+            self.move_cursor(direction * Self::WHEEL_ITEMS);
+            return;
+        }
+        if hit.commands.contains_list(col, row) {
+            self.focus = Focus::Commands;
+            self.move_cursor(direction * Self::WHEEL_ITEMS);
+            return;
+        }
+        if hit.preview.contains(col, row) {
+            self.focus = Focus::Preview;
+            self.scroll_preview(direction * Self::WHEEL_LINES);
+            return;
+        }
+        if hit.jobs.contains_list(col, row) {
+            self.focus = Focus::Jobs;
+            self.move_cursor(direction * Self::WHEEL_ITEMS);
+        }
+    }
+
+    fn scroll_job_log(&mut self, delta: i32) {
+        let Modal::JobLog(modal) = &mut self.modal else {
+            return;
+        };
+        modal.follow = false;
+        let vis = modal.last_visible_lines.max(1);
+        let max = ui::modals::job_log::max_scroll(modal, vis);
+        modal.scroll = scroll_by(modal.scroll, delta, max);
+        ui::modals::job_log::clamp_scroll(modal, vis);
+    }
+
+    fn scroll_help(&mut self, delta: i32) {
+        let Modal::Help(modal) = &mut self.modal else {
+            return;
+        };
+        let vis = modal.last_visible_lines.max(1);
+        let max = ui::modals::help::max_scroll(modal, vis);
+        modal.scroll = scroll_by(modal.scroll, delta, max);
+        ui::modals::help::clamp_scroll(modal, vis);
+    }
+
+    fn scroll_preview(&mut self, delta: i32) {
+        let vis = self.preview_visible_lines.max(1);
+        let max = ui::panels::preview::max_preview_scroll(self, vis);
+        self.preview_scroll = scroll_by(self.preview_scroll, delta, max);
+        ui::panels::preview::clamp_preview_scroll(self, vis);
+    }
+
+    fn scroll_search_cursor(&mut self, delta: i32) {
+        let Modal::Search { matches, cursor } = &mut self.modal else {
+            return;
+        };
+        if matches.is_empty() {
+            return;
+        }
+        let max = matches.len().saturating_sub(1) as i32;
+        *cursor = (*cursor as i32 + delta).clamp(0, max) as usize;
+    }
+
+    fn scroll_cve_cursor(&mut self, delta: i32) {
+        let Modal::Cve(m) = &mut self.modal else {
+            return;
+        };
+        if m.detail || m.syncing || m.results.is_empty() {
+            return;
+        }
+        let max = m.results.len().saturating_sub(1) as i32;
+        let new = (m.cursor as i32 + delta).clamp(0, max) as usize;
+        if new != m.cursor {
+            m.cursor = new;
+            m.detail_scroll = 0;
+        }
+    }
+
+    fn scroll_cve_detail(&mut self, delta: i32) {
+        let Modal::Cve(m) = &mut self.modal else {
+            return;
+        };
+        if !m.detail {
+            return;
+        }
+        let vis = self
+            .hit
+            .cve_detail_scroll
+            .map(|r| r.visible_lines)
+            .unwrap_or(1);
+        let max = ui::modals::cve::max_detail_scroll(m, vis);
+        m.detail_scroll = scroll_by(m.detail_scroll, delta, max);
+        ui::modals::cve::clamp_detail_scroll(m, vis);
+    }
+
+    fn reset_preview_scroll(&mut self) {
+        self.preview_scroll = 0;
+    }
+
+    fn handle_status_bar_action(&mut self, action: StatusBarAction) {
+        match action {
+            StatusBarAction::Engagement => self.open_engagement_modal(&[]),
+            StatusBarAction::Target => self.open_target_modal(&[]),
+            StatusBarAction::Ap => self.open_ap_modal(&[]),
+            StatusBarAction::Pivot => self.open_pivot_modal(&[]),
+            StatusBarAction::Creds => self.open_creds_modal(&[]),
+            StatusBarAction::Jobs => self.focus = Focus::Jobs,
+        }
+    }
+
+    fn handle_edit_modal_click(&mut self, column: u16, row: u16, shift: bool) {
+        let _ = shift;
+        let hit = self.hit.edit;
+
+        if let Some(list) = hit.and_then(|e| e.suggestions) {
+            let len = match &self.modal {
+                Modal::Edit(m) => m.path_suggestions.len(),
+                _ => 0,
+            };
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Edit(m) = &mut self.modal {
+                    m.path_pick = idx;
+                }
+                if self.is_double_click(MouseClickTarget::EditSuggestion { index: idx }) {
+                    self.apply_edit_path_pick(idx);
+                }
+                return;
+            }
+        }
+
+        let Some(edit) = hit else {
+            return;
+        };
+        if !edit.textarea.contains(column, row) {
+            return;
+        }
+
+        let (scroll, panel) = match &mut self.modal {
+            Modal::Edit(m) => (m.textarea_scroll, edit.textarea_panel),
+            _ => return,
+        };
+        if let Modal::Edit(m) = &mut self.modal {
+            m.path_suggestions.clear();
+            crate::ui::textarea_mouse::textarea_cursor_from_click(
+                &mut m.textarea,
+                panel,
+                scroll,
+                column,
+                row,
+            );
+        }
+        self.clear_mouse_click();
+    }
+
+    fn apply_edit_path_pick(&mut self, pick: usize) {
+        let Modal::Edit(em) = &mut self.modal else {
+            return;
+        };
+        if pick >= em.path_suggestions.len() {
+            return;
+        }
+        em.path_pick = pick;
+        let choice = em.path_suggestions[pick].clone();
+        let (row, col) = em.textarea.cursor();
+        let line = em.textarea.lines().get(row).cloned().unwrap_or_default();
+        let Some(token) = crate::path_complete::token_at_cursor(&line, col as usize) else {
+            return;
+        };
+        crate::path_complete::replace_token(
+            &mut em.textarea,
+            row,
+            token.start,
+            token.end,
+            &choice,
+        );
+    }
+
+    fn scroll_edit_textarea(&mut self, delta: i32) {
+        let Modal::Edit(m) = &mut self.modal else {
+            return;
+        };
+        let rows = delta.clamp(-32, 32) as i16;
+        if rows != 0 {
+            m.textarea.scroll((rows, 0));
+        }
+    }
+
+    fn dismiss_modal_backdrop(&mut self) {
+        match (&self.modal, self.mode) {
+            (Modal::None, _) => {}
+            (_, Mode::Search) | (_, Mode::SearchGlobal) => {
+                self.mode = Mode::Normal;
+                self.search_buf.clear();
+                self.modal = Modal::None;
+                self.needs_full_redraw = true;
+            }
+            (Modal::Edit(_), Mode::Insert) => {
+                self.modal = Modal::None;
+                self.mode = Mode::Normal;
+                self.needs_full_redraw = true;
+            }
+            (Modal::Cve(m), _) if m.syncing => {
+                self.modal = Modal::None;
+                self.needs_full_redraw = true;
+            }
+            (Modal::Cve(m), _) if m.detail => {
+                if let Modal::Cve(m) = &mut self.modal {
+                    m.detail = false;
+                }
+            }
+            _ => {
+                self.modal = Modal::None;
+                self.mode = Mode::Normal;
+                self.needs_full_redraw = true;
+            }
+        }
+    }
+
+    fn handle_main_panel_click(&mut self, column: u16, row: u16, shift: bool) {
+        let hit = &self.hit;
+
+        if let Some(idx) = hit
+            .categories
+            .list_index_at(column, row, self.library.categories.len())
+        {
+            self.focus = Focus::Categories;
+            if idx != self.selected_category {
+                self.selected_category = idx;
+                self.selected_command = 0;
+                self.reset_preview_scroll();
+            }
+            self.clear_mouse_click();
+            return;
+        }
+
+        if hit.categories.contains_panel(column, row) {
+            self.focus = Focus::Categories;
+            self.clear_mouse_click();
+            return;
+        }
+
+        let cmd_len = self.visible_commands().len();
+        if let Some(idx) = hit.commands.list_index_at(column, row, cmd_len) {
+            self.focus = Focus::Commands;
+            if idx != self.selected_command {
+                self.selected_command = idx;
+                self.reset_preview_scroll();
+            }
+            if shift {
+                self.toggle_select_at_index(idx);
+                self.clear_mouse_click();
+                return;
+            }
+            if self.is_double_click(MouseClickTarget::Commands { index: idx }) {
+                self.run_current(1);
+            }
+            return;
+        }
+
+        if hit.commands.contains_panel(column, row) {
+            self.focus = Focus::Commands;
+            self.clear_mouse_click();
+            return;
+        }
+
+        if hit.preview.contains(column, row) {
+            self.focus = Focus::Preview;
+            self.clear_mouse_click();
+            return;
+        }
+
+        let job_count = self.jobs.len().min(50);
+        if let Some(idx) = hit.jobs.list_index_at(column, row, job_count) {
+            self.focus = Focus::Jobs;
+            self.selected_job = idx.min(self.jobs.len().saturating_sub(1));
+            if self.is_double_click(MouseClickTarget::Jobs { index: idx }) {
+                self.open_job_log_modal();
+            }
+            return;
+        }
+
+        if hit.jobs.contains_panel(column, row) {
+            self.focus = Focus::Jobs;
+            self.clear_mouse_click();
+        }
+    }
+
+    fn handle_modal_panel_click(&mut self, column: u16, row: u16, shift: bool) {
+        let _ = shift;
+        let hit = &self.hit;
+
+        if let Some(list) = hit.search_list {
+            let len = match &self.modal {
+                Modal::Search { matches, .. } => matches.len(),
+                _ => 0,
+            };
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Search { cursor, .. } = &mut self.modal {
+                    *cursor = idx;
+                }
+                if self.is_double_click(MouseClickTarget::Search { index: idx }) {
+                    self.commit_search_selection();
+                }
+                return;
+            }
+        }
+
+        if let Some(list) = hit.cve_list {
+            let len = match &self.modal {
+                Modal::Cve(m) if !m.detail && !m.syncing => m.results.len(),
+                _ => 0,
+            };
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Cve(m) = &mut self.modal {
+                    m.cursor = idx;
+                    m.detail_scroll = 0;
+                }
+                if self.is_double_click(MouseClickTarget::Cve { index: idx }) {
+                    if let Modal::Cve(m) = &mut self.modal {
+                        if !m.results.is_empty() {
+                            m.detail = true;
+                            m.detail_scroll = 0;
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
+        if let Some(list) = hit.engagement_list {
+            let len = match &self.modal {
+                Modal::Engagement(m) if m.new_name_prompt.is_none() => m.available.len(),
+                _ => 0,
+            };
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Engagement(m) = &mut self.modal {
+                    m.cursor = idx;
+                }
+                if self.is_double_click(MouseClickTarget::Engagement { index: idx }) {
+                    self.activate_engagement_modal();
+                }
+                return;
+            }
+        }
+
+        if let Some(list) = hit.target_list {
+            let len = self
+                .engagement
+                .as_ref()
+                .map(|e| e.targets.targets.len())
+                .unwrap_or(0);
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Target(m) = &mut self.modal {
+                    if let TargetModalState::List { cursor } = &mut m.state {
+                        *cursor = idx;
+                    }
+                }
+                if self.is_double_click(MouseClickTarget::Target { index: idx }) {
+                    self.activate_target_modal();
+                }
+                return;
+            }
+        }
+
+        if let Some(list) = hit.ap_list {
+            let len = self
+                .engagement
+                .as_ref()
+                .map(|e| e.aps.aps.len())
+                .unwrap_or(0);
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Ap(m) = &mut self.modal {
+                    if let ApModalState::List { cursor } = &mut m.state {
+                        *cursor = idx;
+                    }
+                }
+                if self.is_double_click(MouseClickTarget::Ap { index: idx }) {
+                    self.activate_ap_modal();
+                }
+                return;
+            }
+        }
+
+        if let Some(list) = hit.pivot_list {
+            let len = self
+                .engagement
+                .as_ref()
+                .map(|e| e.pivots.pivots.len())
+                .unwrap_or(0);
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Pivot(m) = &mut self.modal {
+                    if let PivotModalState::List { cursor } = &mut m.state {
+                        *cursor = idx;
+                    }
+                }
+                if self.is_double_click(MouseClickTarget::Pivot { index: idx }) {
+                    self.activate_pivot_modal();
+                }
+                return;
+            }
+        }
+
+        if let Some(list) = hit.creds_list {
+            let len = self
+                .engagement
+                .as_ref()
+                .map(|e| e.profiles.profiles.len())
+                .unwrap_or(0);
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Creds(m) = &mut self.modal {
+                    if let CredsModalState::List { cursor } = &mut m.state {
+                        *cursor = idx;
+                    }
+                }
+                if self.is_double_click(MouseClickTarget::Creds { index: idx }) {
+                    self.activate_creds_modal();
+                }
+                return;
+            }
+        }
+
+        if let Some(list) = hit.variables_list {
+            let unset_only = match &self.modal {
+                Modal::Variables(m) => matches!(
+                    m.state,
+                    VariablesModalState::List {
+                        unset_only: true,
+                        ..
+                    }
+                ),
+                _ => false,
+            };
+            let len = self.variable_rows(unset_only).len();
+            if let Some(idx) = list.list_index_at(column, row, len) {
+                if let Modal::Variables(m) = &mut self.modal {
+                    if let VariablesModalState::List { cursor, .. } = &mut m.state {
+                        *cursor = idx;
+                    }
+                }
+                if self.is_double_click(MouseClickTarget::Variables { index: idx }) {
+                    self.activate_variables_modal();
+                }
+            }
+        }
+    }
+
+    fn activate_engagement_modal(&mut self) {
+        let name = match &self.modal {
+            Modal::Engagement(m) if m.new_name_prompt.is_none() => {
+                m.available.get(m.cursor).cloned()
+            }
+            _ => None,
+        };
+        if let Some(name) = name {
+            self.modal = Modal::None;
+            self.switch_engagement(&name);
+        }
+    }
+
+    fn activate_target_modal(&mut self) {
+        let name = match (&self.modal, self.engagement.as_ref()) {
+            (Modal::Target(m), Some(eng)) => match &m.state {
+                TargetModalState::List { cursor } => eng
+                    .targets
+                    .targets
+                    .get(*cursor)
+                    .map(|t| t.name.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let (Some(name), Some(eng)) = (name, self.engagement.as_mut()) {
+            eng.targets.set_active(&name);
+            let _ = eng.save_targets();
+            self.flash_ok(format!("target '{}' active", name));
+        }
+    }
+
+    fn activate_ap_modal(&mut self) {
+        let name = match (&self.modal, self.engagement.as_ref()) {
+            (Modal::Ap(m), Some(eng)) => match &m.state {
+                ApModalState::List { cursor } => {
+                    eng.aps.aps.get(*cursor).map(|a| a.name.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let (Some(name), Some(eng)) = (name, self.engagement.as_mut()) {
+            eng.aps.set_active(&name);
+            let _ = eng.save_aps();
+            self.flash_ok(format!("AP '{}' active", name));
+        }
+    }
+
+    fn activate_pivot_modal(&mut self) {
+        let name = match (&self.modal, self.engagement.as_ref()) {
+            (Modal::Pivot(m), Some(eng)) => match &m.state {
+                PivotModalState::List { cursor } => eng
+                    .pivots
+                    .pivots
+                    .get(*cursor)
+                    .map(|p| p.name.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let (Some(name), Some(eng)) = (name, self.engagement.as_mut()) {
+            eng.pivots.set_active_tunnel(&name);
+            eng.pivots.set_active_remote(&name);
+            let _ = eng.save_pivots();
+            self.flash_ok(format!("pivot '{}' active (tunnel + remote)", name));
+        }
+    }
+
+    fn activate_creds_modal(&mut self) {
+        let name = match (&self.modal, self.engagement.as_ref()) {
+            (Modal::Creds(m), Some(eng)) => match &m.state {
+                CredsModalState::List { cursor } => eng
+                    .profiles
+                    .profiles
+                    .get(*cursor)
+                    .map(|p| p.name.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let (Some(name), Some(eng)) = (name, self.engagement.as_mut()) {
+            eng.profiles.set_active(&name);
+            let _ = eng.save_profiles();
+            self.flash_ok(format!("profile '{}' active", name));
+        }
+    }
+
+    fn activate_variables_modal(&mut self) {
+        let unset_only = match &self.modal {
+            Modal::Variables(m) => match &m.state {
+                VariablesModalState::List { unset_only, .. } => *unset_only,
+                _ => return,
+            },
+            _ => return,
+        };
+        let row = match &self.modal {
+            Modal::Variables(m) => match &m.state {
+                VariablesModalState::List { cursor, .. } => {
+                    self.variable_rows(unset_only).get(*cursor).cloned()
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(row) = row else {
+            return;
+        };
+        if let Modal::Variables(m) = &mut self.modal {
+            m.state = VariablesModalState::Edit {
+                name: row.name,
+                value: row.value.clone().unwrap_or_default(),
+                focused: if row.value.as_ref().is_some_and(|v| !v.is_empty()) {
+                    1
+                } else {
+                    0
+                },
+                name_editable: false,
+            };
+        }
+    }
+
+    fn toggle_select_at_index(&mut self, idx: usize) {
+        let visible = self.visible_commands();
+        let Some(cmd) = visible.get(idx) else {
+            return;
+        };
+        let Some(cat) = self.current_category().cloned() else {
+            return;
+        };
+        let key = (cat.id, cmd.id.clone());
+        if !self.multi_selected.insert(key.clone()) {
+            self.multi_selected.remove(&key);
         }
     }
 
@@ -838,6 +1580,7 @@ impl App {
                 if new != self.selected_category {
                     self.selected_category = new;
                     self.selected_command = 0;
+                    self.reset_preview_scroll();
                 }
             }
             Focus::Commands => {
@@ -846,7 +1589,10 @@ impl App {
                     return;
                 }
                 let new = (self.selected_command as i32 + delta).clamp(0, len as i32 - 1) as usize;
-                self.selected_command = new;
+                if new != self.selected_command {
+                    self.selected_command = new;
+                    self.reset_preview_scroll();
+                }
             }
             Focus::Jobs => {
                 let len = self.jobs.len();
@@ -856,7 +1602,7 @@ impl App {
                 let new = (self.selected_job as i32 + delta).clamp(0, len as i32 - 1) as usize;
                 self.selected_job = new;
             }
-            Focus::Preview => {}
+            Focus::Preview => self.scroll_preview(delta),
         }
     }
 
@@ -2497,6 +3243,7 @@ impl App {
             save_as_prompt: None,
             path_suggestions: Vec::new(),
             path_pick: 0,
+            textarea_scroll: (0, 0),
         });
         self.mode = Mode::Insert;
     }
@@ -2873,8 +3620,32 @@ impl App {
 
         if let Modal::Cve(m) = &mut self.modal {
             if m.detail {
+                let vis = self
+                    .hit
+                    .cve_detail_scroll
+                    .map(|r| r.visible_lines)
+                    .unwrap_or(1);
                 match ke.code {
-                    KeyCode::Esc => m.detail = false,
+                    KeyCode::Esc => {
+                        m.detail = false;
+                        m.detail_scroll = 0;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let max = ui::modals::cve::max_detail_scroll(m, vis);
+                        m.detail_scroll = (m.detail_scroll + 1).min(max);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        m.detail_scroll = m.detail_scroll.saturating_sub(1);
+                    }
+                    KeyCode::Char('d') if ke.modifiers.contains(KeyModifiers::CONTROL) => {
+                        let max = ui::modals::cve::max_detail_scroll(m, vis);
+                        let page = vis.max(1);
+                        m.detail_scroll = (m.detail_scroll + page).min(max);
+                    }
+                    KeyCode::Char('u') if ke.modifiers.contains(KeyModifiers::CONTROL) => {
+                        let page = vis.max(1);
+                        m.detail_scroll = m.detail_scroll.saturating_sub(page);
+                    }
                     KeyCode::Char('y') => {
                         if let Some(rec) = m.results.get(m.cursor) {
                             let id = rec.id.clone();
@@ -2899,18 +3670,23 @@ impl App {
                 if let Modal::Cve(m) = &mut self.modal {
                     if m.cursor + 1 < m.results.len() {
                         m.cursor += 1;
+                        m.detail_scroll = 0;
                     }
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 if let Modal::Cve(m) = &mut self.modal {
-                    m.cursor = m.cursor.saturating_sub(1);
+                    if m.cursor > 0 {
+                        m.cursor -= 1;
+                        m.detail_scroll = 0;
+                    }
                 }
             }
             KeyCode::Enter => {
                 if let Modal::Cve(m) = &mut self.modal {
                     if !m.results.is_empty() {
                         m.detail = true;
+                        m.detail_scroll = 0;
                     }
                 }
             }
