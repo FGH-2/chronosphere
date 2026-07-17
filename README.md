@@ -307,7 +307,6 @@ chronosphere/
 │   ├── wsus.toml           rogue WSUS + ESC17
 │   ├── kerberos.toml       getTGT / getST / s4u
 │   ├── obfuscation.toml    PowerShell, donut, ScareCrow, ...
-│   ├── cves.toml           nuclei / searchsploit / msfconsole
 │   ├── web.toml            JWT, SSRF, OSINT, ffuf, hydra
 │   ├── linux-privesc.toml  pspy, linpeas, GTFOBins picks
 │   └── ...
@@ -318,10 +317,10 @@ chronosphere/
 
 The following are sketched in the design notes but not implemented:
 
-- **Local CVE index** with FTS5 + optional embeddings for description search.
-- **PoC pipeline** that monitors NVD/KEV, pulls from `trickest/cve` etc., and surfaces them as runnable commands.
 - **Obfuscation toolbelt** (PowerShell encoders, AMSI bypass templates, donut/ScareCrow wrappers).
 - **Pro-Lab evasion preset** (defender recon, ETW disable hints, etc.).
+
+Local CVE search/sync is available via `chronosphere cve`.
 
 If you need any of these urgently, open an issue and we'll talk.
 

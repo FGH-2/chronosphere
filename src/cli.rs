@@ -927,6 +927,20 @@ pub async fn dispatch(cli: Cli) -> Result<bool> {
                 config::cve_db_path().display(),
                 config::format_storage_size(config::cve_storage_size_bytes()),
             );
+            let poc = crate::cve::PocIndex::global();
+            let poc_idx = poc.root.join("index.toml");
+            if poc_idx.is_file() {
+                println!(
+                    "poc root:    {} ({} ready)",
+                    poc.root.display(),
+                    poc.len()
+                );
+            } else {
+                println!(
+                    "poc root:    {} (no index.toml — set CHRONO_POC_ROOT or mount ~/pocs)",
+                    poc.root.display()
+                );
+            }
             Ok(true)
         }
         Command::PathInstall => {
@@ -1560,6 +1574,9 @@ async fn dispatch_cve(cmd: CveCmd) -> Result<()> {
 
 fn print_cve_summary(rec: &crate::cve::CveRecord) {
     let kev = if rec.in_kev { " [KEV]" } else { "" };
+    let poc = crate::cve::poc_index::lookup(&rec.id)
+        .map(|e| format!(" {}", e.badge()))
+        .unwrap_or_default();
     let sev = rec.severity.as_deref().unwrap_or("-");
     let score = rec
         .cvss_v31
@@ -1567,8 +1584,8 @@ fn print_cve_summary(rec: &crate::cve::CveRecord) {
         .unwrap_or_else(|| "-".into());
     let desc: String = rec.description.chars().take(80).collect();
     println!(
-        "{:<18} {:>8} CVSS {}  {}{}",
-        rec.id, sev, score, desc, kev
+        "{:<18} {:>8} CVSS {}  {}{}{}",
+        rec.id, sev, score, desc, kev, poc
     );
 }
 
@@ -1600,6 +1617,21 @@ fn print_cve_record(rec: &crate::cve::CveRecord, verbose: bool) {
             e,
             rec.epss_percentile.unwrap_or(0.0) * 100.0
         );
+    }
+    if let Some(poc) = crate::cve::poc_index::lookup(&rec.id) {
+        let root = &crate::cve::PocIndex::global().root;
+        println!(
+            "  local PoC: {}  {}",
+            poc.status,
+            poc.absolute_path(root).display()
+        );
+        if let Some(id) = &poc.chronosphere_id {
+            println!("  run:       chronosphere run {id}");
+        }
+        if let Some(notes) = &poc.notes {
+            let short: String = notes.chars().take(120).collect();
+            println!("  poc notes: {short}");
+        }
     }
     if !rec.sources.is_empty() {
         println!("  sources:   {}", rec.sources.iter().cloned().collect::<Vec<_>>().join(", "));

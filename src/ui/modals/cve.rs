@@ -46,6 +46,20 @@ fn build_detail_lines(modal: &CveModal) -> Vec<Line<'static>> {
             Theme::warn(),
         )));
     }
+    if let Some(poc) = crate::cve::poc_index::lookup(&rec.id) {
+        let root = &crate::cve::PocIndex::global().root;
+        lines.push(Line::from(Span::styled(
+            format!(
+                "Local PoC [{}] {}",
+                poc.status,
+                poc.absolute_path(root).display()
+            ),
+            Theme::accent_bold(),
+        )));
+        if let Some(id) = &poc.chronosphere_id {
+            lines.push(Line::from(format!("run: chronosphere run {id}")));
+        }
+    }
     if let Some(e) = rec.epss_score {
         lines.push(Line::from(format!(
             "EPSS {:.4} (p{:.1}%)",
@@ -186,6 +200,9 @@ pub fn render(
         .iter()
         .map(|rec| {
             let kev = if rec.in_kev { " KEV" } else { "" };
+            let poc = crate::cve::poc_index::lookup(&rec.id)
+                .map(|e| format!(" {}", e.badge()))
+                .unwrap_or_default();
             let sev = rec.severity.as_deref().unwrap_or("-");
             let cvss = rec
                 .cvss_v31
@@ -196,6 +213,7 @@ pub fn render(
                 Span::styled(format!("{:<18}", rec.id), Theme::accent_bold()),
                 Span::styled(format!(" {sev}{cvss}"), Theme::warn()),
                 Span::raw(format!(" {desc}{kev}")),
+                Span::styled(poc, Theme::accent_bold()),
             ]))
         })
         .collect();
