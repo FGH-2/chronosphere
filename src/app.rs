@@ -399,6 +399,8 @@ pub struct CveModal {
     pub detail_record: Option<crate::cve::CveRecord>,
     pub detail_scroll: usize,
     pub kev_only: bool,
+    /// Restrict list to CVEs with a ready first-party PoC.
+    pub poc_only: bool,
     pub syncing: bool,
     pub db_total: u64,
     pub db_kev: u64,
@@ -421,6 +423,7 @@ impl Default for CveModal {
             detail_record: None,
             detail_scroll: 0,
             kev_only: false,
+            poc_only: false,
             syncing: false,
             db_total: 0,
             db_kev: 0,
@@ -3568,7 +3571,7 @@ impl App {
     }
 
     fn open_cve_modal(&mut self) {
-        let (results, total) = Self::load_cve_page("", false, 0);
+        let (results, total) = Self::load_cve_page("", false, false, 0);
         let mut modal = CveModal {
             results,
             total_matches: total,
@@ -3586,7 +3589,7 @@ impl App {
         }
     }
 
-    fn cve_filter(query: &str, kev_only: bool, page: usize) -> crate::cve::CveFilter {
+    fn cve_filter(query: &str, kev_only: bool, poc_only: bool, page: usize) -> crate::cve::CveFilter {
         let q = query.trim();
         crate::cve::CveFilter {
             query: if q.is_empty() {
@@ -3595,6 +3598,7 @@ impl App {
                 Some(q.to_string())
             },
             kev_only,
+            poc_only,
             limit: CVE_PAGE_SIZE,
             offset: page * CVE_PAGE_SIZE,
             ..Default::default()
@@ -3602,20 +3606,25 @@ impl App {
     }
 
     /// Fetch one page of summaries plus the total match count for the filter.
-    fn load_cve_page(query: &str, kev_only: bool, page: usize) -> (Vec<crate::cve::CveSummary>, u64) {
-        let filter = Self::cve_filter(query, kev_only, page);
+    fn load_cve_page(
+        query: &str,
+        kev_only: bool,
+        poc_only: bool,
+        page: usize,
+    ) -> (Vec<crate::cve::CveSummary>, u64) {
+        let filter = Self::cve_filter(query, kev_only, poc_only, page);
         let results = crate::cve::search_summaries(filter.clone()).unwrap_or_default();
         let total = crate::cve::count(filter).unwrap_or(results.len() as u64);
         (results, total)
     }
 
-    /// Reload page 0 after the query or KEV filter changed.
+    /// Reload page 0 after the query or KEV/PoC filter changed.
     fn refresh_cve_modal_results(&mut self) {
-        let (q, kev) = match &self.modal {
-            Modal::Cve(m) => (m.query.clone(), m.kev_only),
+        let (q, kev, poc) = match &self.modal {
+            Modal::Cve(m) => (m.query.clone(), m.kev_only, m.poc_only),
             _ => return,
         };
-        let (results, total) = Self::load_cve_page(&q, kev, 0);
+        let (results, total) = Self::load_cve_page(&q, kev, poc, 0);
         if let Modal::Cve(m) = &mut self.modal {
             m.page = 0;
             m.results = results;
@@ -3630,12 +3639,12 @@ impl App {
     /// Load an absolute page, clamped to the valid range. `cursor_at_end` places
     /// the cursor on the last row (used when paging backwards past the top).
     fn load_cve_modal_page(&mut self, page: usize, cursor_at_end: bool) {
-        let (q, kev, total_pages) = match &self.modal {
-            Modal::Cve(m) => (m.query.clone(), m.kev_only, m.total_pages()),
+        let (q, kev, poc, total_pages) = match &self.modal {
+            Modal::Cve(m) => (m.query.clone(), m.kev_only, m.poc_only, m.total_pages()),
             _ => return,
         };
         let page = page.min(total_pages.saturating_sub(1));
-        let (results, total) = Self::load_cve_page(&q, kev, page);
+        let (results, total) = Self::load_cve_page(&q, kev, poc, page);
         if let Modal::Cve(m) = &mut self.modal {
             m.page = page;
             m.cursor = if cursor_at_end {
@@ -3831,6 +3840,12 @@ impl App {
             KeyCode::Char('K') => {
                 if let Modal::Cve(m) = &mut self.modal {
                     m.kev_only = !m.kev_only;
+                    self.refresh_cve_modal_results();
+                }
+            }
+            KeyCode::Char('P') => {
+                if let Modal::Cve(m) = &mut self.modal {
+                    m.poc_only = !m.poc_only;
                     self.refresh_cve_modal_results();
                 }
             }

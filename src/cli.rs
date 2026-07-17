@@ -220,6 +220,9 @@ pub enum CveCmd {
         severity: Option<String>,
         #[arg(long)]
         kev: bool,
+        /// Only CVEs with a ready first-party PoC (lab-pass / htb-used in ~/pocs).
+        #[arg(long)]
+        poc: bool,
         #[arg(long)]
         min_epss: Option<f64>,
         #[arg(long)]
@@ -636,6 +639,7 @@ standalone_cli!(
   chronosphere cve sync --month 2026-03         One month via NVD API
   chronosphere cve sync --years 2025            Full year feed (implies --full)
   chronosphere cve search nginx rce --limit 20
+  chronosphere cve search --poc
   chronosphere cve show CVE-2024-3400
 
 Run `chronosphere cve sync --help` for all sync flags."
@@ -1510,6 +1514,7 @@ async fn dispatch_cve(cmd: CveCmd) -> Result<()> {
             cwe,
             severity,
             kev,
+            poc,
             min_epss,
             since,
             tag,
@@ -1526,6 +1531,7 @@ async fn dispatch_cve(cmd: CveCmd) -> Result<()> {
                 cwe,
                 severity,
                 kev_only: kev,
+                poc_only: poc,
                 min_epss,
                 since_days,
                 tag,

@@ -180,15 +180,22 @@ pub fn render(
         modal.page * modal.page_size + 1
     };
     let page_end = modal.page * modal.page_size + modal.results.len();
+    let mode = match (modal.kev_only, modal.poc_only) {
+        (true, true) => "[KEV+POC]",
+        (true, false) => "[KEV]",
+        (false, true) => "[POC]",
+        (false, false) => "[all]",
+    };
     let chips = format!(
-        "{}  {}-{} of {}  page {}/{}  j/k move  ←/→ PgUp/PgDn page  Enter detail  y yank  s sync  K KEV{}  Esc close",
-        if modal.kev_only { "[KEV]" } else { "[all]" },
+        "{}  {}-{} of {}  page {}/{}  j/k move  ←/→ page  Enter detail  y yank  s sync  K KEV{}  P PoC{}  Esc close",
+        mode,
         page_start,
         page_end,
         modal.total_matches,
         modal.page + 1,
         total_pages,
         if modal.kev_only { "✓" } else { "" },
+        if modal.poc_only { "✓" } else { "" },
     );
     f.render_widget(
         Paragraph::new(chips).style(Theme::muted()),
@@ -235,7 +242,7 @@ pub fn render(
     let hint = if modal.db_total == 0 {
         "Empty index — press s to sync from NVD/KEV"
     } else if modal.results.is_empty() {
-        "No matches for this filter — clear query or toggle KEV"
+        "No matches — clear query or toggle KEV/PoC (need ~/pocs index.toml)"
     } else {
         ""
     };

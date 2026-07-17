@@ -107,6 +107,15 @@ impl PocIndex {
     pub fn len(&self) -> usize {
         self.by_cve.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_cve.is_empty()
+    }
+
+    /// Ready CVE ids (uppercase), for SQL `IN` filters.
+    pub fn cve_ids(&self) -> Vec<String> {
+        self.by_cve.keys().cloned().collect()
+    }
 }
 
 pub fn poc_root() -> PathBuf {

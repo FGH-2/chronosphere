@@ -1,4 +1,5 @@
 use crate::cve::model::CveFilter;
+use crate::cve::poc_index::PocIndex;
 use rusqlite::types::Value;
 
 const ORDER_BY: &str = "ORDER BY c.modified DESC NULLS LAST, c.id DESC";
@@ -62,6 +63,23 @@ fn build_where(filter: &CveFilter) -> (String, Vec<Value>) {
 
     if filter.kev_only {
         where_clauses.push("c.in_kev = 1".into());
+    }
+
+    if filter.poc_only {
+        let ids = PocIndex::global().cve_ids();
+        if ids.is_empty() {
+            // No ready PoCs indexed — match nothing.
+            where_clauses.push("0".into());
+        } else {
+            let start = params.len() + 1;
+            let placeholders: Vec<String> = (0..ids.len())
+                .map(|i| format!("?{}", start + i))
+                .collect();
+            where_clauses.push(format!("c.id IN ({})", placeholders.join(", ")));
+            for id in ids {
+                params.push(Value::Text(id));
+            }
+        }
     }
 
     if let Some(min) = filter.min_epss {
@@ -141,6 +159,25 @@ mod tests {
         };
         let (sql, _) = build_search_query(&f);
         assert!(sql.contains("in_kev = 1"));
+    }
+
+    #[test]
+    fn builds_poc_filter_empty_index() {
+        // Without CHRONO_POC_ROOT / ~/pocs, the global index is typically empty
+        // and poc_only must still produce valid SQL that matches nothing.
+        let f = CveFilter {
+            poc_only: true,
+            limit: 20,
+            ..Default::default()
+        };
+        let (sql, params) = build_search_query(&f);
+        if PocIndex::global().is_empty() {
+            assert!(sql.contains("WHERE 0"));
+            assert!(params.is_empty());
+        } else {
+            assert!(sql.contains("c.id IN ("));
+            assert_eq!(params.len(), PocIndex::global().len());
+        }
     }
 
     #[test]

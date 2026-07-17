@@ -47,6 +47,8 @@ pub struct CveFilter {
     pub cwe: Option<String>,
     pub severity: Option<String>,
     pub kev_only: bool,
+    /// Restrict to CVEs with a ready first-party PoC (`lab-pass` / `htb-used`).
+    pub poc_only: bool,
     pub min_epss: Option<f64>,
     pub since_days: Option<u32>,
     pub tag: Option<String>,
