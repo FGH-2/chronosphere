@@ -1516,6 +1516,7 @@ async fn dispatch_cve(cmd: CveCmd) -> Result<()> {
                 since_days,
                 tag,
                 limit,
+                offset: 0,
             };
             let hits = search(filter)?;
             if json {

@@ -1,6 +1,6 @@
 use crate::config;
 use crate::cve::filter::build_search_query;
-use crate::cve::model::{CveFilter, CveRecord, CveReference, CveStatus};
+use crate::cve::model::{CveFilter, CveRecord, CveReference, CveStatus, CveSummary};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -309,6 +309,35 @@ impl CveStore {
         Ok(out)
     }
 
+    /// List/browse projection: one query, no child-table hydration. Use this
+    /// for the paged browse view; hydrate a full [`CveRecord`] via [`Self::get`]
+    /// only when a single record's detail is opened.
+    pub fn search_summaries(&self, filter: &CveFilter) -> Result<Vec<CveSummary>> {
+        let (sql, params_vec) = crate::cve::filter::build_summary_query(filter);
+        let mut stmt = self.conn.prepare(&sql)?;
+        let refs = Self::params_as_refs(&params_vec);
+        let rows = stmt.query_map(refs.as_slice(), |r| {
+            Ok(CveSummary {
+                id: r.get(0)?,
+                severity: r.get(1)?,
+                cvss_v31: r.get(2)?,
+                in_kev: r.get::<_, i32>(3)? != 0,
+                description: r.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Total number of rows matching the filter, ignoring limit/offset.
+    pub fn count(&self, filter: &CveFilter) -> Result<u64> {
+        let (sql, params_vec) = crate::cve::filter::build_count_query(filter);
+        let refs = Self::params_as_refs(&params_vec);
+        let n: u64 = self
+            .conn
+            .query_row(&sql, refs.as_slice(), |r| r.get(0))?;
+        Ok(n)
+    }
+
     fn query_ids(stmt: &mut rusqlite::Statement, params_vec: &[rusqlite::types::Value]) -> Result<Vec<String>> {
         let refs = Self::params_as_refs(params_vec);
         let rows = stmt.query_map(refs.as_slice(), |r| r.get::<_, String>(0))?;
@@ -520,6 +549,52 @@ mod tests {
         let hits = store.search(&filter).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, "CVE-2026-9256");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn summaries_paginate_and_count() {
+        let dir = std::env::temp_dir().join(format!("chrono-cve-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("test.db");
+        let mut store = CveStore::open_at(&db).unwrap();
+
+        for i in 0..25 {
+            let mut rec = CveRecord {
+                id: format!("CVE-2026-{:04}", 1000 + i),
+                modified: Some(format!("2026-01-{:02}T00:00:00Z", (i % 28) + 1)),
+                description: "sample vulnerability".into(),
+                cvss_v31: Some(7.5),
+                severity: Some(severity_from_score(7.5).into()),
+                ..Default::default()
+            };
+            rec.sources.insert("nvd".into());
+            store.upsert(&rec).unwrap();
+        }
+
+        let all = CveFilter {
+            limit: 10,
+            ..Default::default()
+        };
+        assert_eq!(store.count(&all).unwrap(), 25);
+
+        let page0 = store.search_summaries(&all).unwrap();
+        assert_eq!(page0.len(), 10);
+
+        let page2 = store
+            .search_summaries(&CveFilter {
+                limit: 10,
+                offset: 20,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page2.len(), 5);
+
+        // Pages must not overlap.
+        let first_ids: std::collections::HashSet<_> =
+            page0.iter().map(|s| s.id.clone()).collect();
+        assert!(page2.iter().all(|s| !first_ids.contains(&s.id)));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -385,18 +385,58 @@ impl VariableEditField {
 #[derive(Default)]
 pub struct ToolsModal;
 
-#[derive(Default)]
+/// Rows shown per page in the CVE browse modal.
+const CVE_PAGE_SIZE: usize = 100;
+
 pub struct CveModal {
     pub query: String,
-    pub results: Vec<crate::cve::CveRecord>,
+    /// Summaries for the current page only (bounded by `page_size`).
+    pub results: Vec<crate::cve::CveSummary>,
+    /// Cursor index within the current page.
     pub cursor: usize,
     pub detail: bool,
+    /// Full record for the open detail view, hydrated lazily on Enter.
+    pub detail_record: Option<crate::cve::CveRecord>,
     pub detail_scroll: usize,
     pub kev_only: bool,
     pub syncing: bool,
     pub db_total: u64,
     pub db_kev: u64,
     pub db_size_bytes: u64,
+    /// Zero-based index of the current page.
+    pub page: usize,
+    /// Rows per page.
+    pub page_size: usize,
+    /// Total rows matching the active filter across all pages.
+    pub total_matches: u64,
+}
+
+impl Default for CveModal {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            results: Vec::new(),
+            cursor: 0,
+            detail: false,
+            detail_record: None,
+            detail_scroll: 0,
+            kev_only: false,
+            syncing: false,
+            db_total: 0,
+            db_kev: 0,
+            db_size_bytes: 0,
+            page: 0,
+            page_size: CVE_PAGE_SIZE,
+            total_matches: 0,
+        }
+    }
+}
+
+impl CveModal {
+    pub fn total_pages(&self) -> usize {
+        let ps = self.page_size.max(1) as u64;
+        (self.total_matches.div_ceil(ps)).max(1) as usize
+    }
 }
 
 #[derive(Default)]
@@ -682,10 +722,9 @@ impl App {
                             ));
                             if let Modal::Cve(m) = &mut self.modal {
                                 m.syncing = false;
-                                m.results = Self::load_cve_results(&m.query, m.kev_only);
-                                m.cursor = 0;
                                 Self::refresh_cve_modal_stats(m);
                             }
+                            self.refresh_cve_modal_results();
                         }
                         Err(e) => {
                             self.flash_error(format!("CVE sync failed: {e:#}"));
@@ -947,17 +986,32 @@ impl App {
     }
 
     fn scroll_cve_cursor(&mut self, delta: i32) {
-        let Modal::Cve(m) = &mut self.modal else {
-            return;
+        let (at_top, at_bottom, has_prev, has_next) = match &self.modal {
+            Modal::Cve(m) if !m.detail && !m.syncing && !m.results.is_empty() => (
+                m.cursor == 0,
+                m.cursor + 1 >= m.results.len(),
+                m.page > 0,
+                m.page + 1 < m.total_pages(),
+            ),
+            _ => return,
         };
-        if m.detail || m.syncing || m.results.is_empty() {
+        if delta > 0 && at_bottom && has_next {
+            let next = if let Modal::Cve(m) = &self.modal { m.page + 1 } else { 0 };
+            self.load_cve_modal_page(next, false);
             return;
         }
-        let max = m.results.len().saturating_sub(1) as i32;
-        let new = (m.cursor as i32 + delta).clamp(0, max) as usize;
-        if new != m.cursor {
-            m.cursor = new;
-            m.detail_scroll = 0;
+        if delta < 0 && at_top && has_prev {
+            let prev = if let Modal::Cve(m) = &self.modal { m.page - 1 } else { 0 };
+            self.load_cve_modal_page(prev, true);
+            return;
+        }
+        if let Modal::Cve(m) = &mut self.modal {
+            let max = m.results.len().saturating_sub(1) as i32;
+            let new = (m.cursor as i32 + delta).clamp(0, max) as usize;
+            if new != m.cursor {
+                m.cursor = new;
+                m.detail_scroll = 0;
+            }
         }
     }
 
@@ -1091,6 +1145,8 @@ impl App {
             (Modal::Cve(m), _) if m.detail => {
                 if let Modal::Cve(m) = &mut self.modal {
                     m.detail = false;
+                    m.detail_record = None;
+                    m.detail_scroll = 0;
                 }
             }
             _ => {
@@ -1201,12 +1257,7 @@ impl App {
                     m.detail_scroll = 0;
                 }
                 if self.is_double_click(MouseClickTarget::Cve { index: idx }) {
-                    if let Modal::Cve(m) = &mut self.modal {
-                        if !m.results.is_empty() {
-                            m.detail = true;
-                            m.detail_scroll = 0;
-                        }
-                    }
+                    self.open_cve_detail();
                 }
                 return;
             }
@@ -3517,9 +3568,10 @@ impl App {
     }
 
     fn open_cve_modal(&mut self) {
-        let results = Self::load_cve_results("", false);
+        let (results, total) = Self::load_cve_page("", false, 0);
         let mut modal = CveModal {
             results,
+            total_matches: total,
             ..Default::default()
         };
         Self::refresh_cve_modal_stats(&mut modal);
@@ -3534,52 +3586,83 @@ impl App {
         }
     }
 
-    fn load_cve_results(query: &str, kev_only: bool) -> Vec<crate::cve::CveRecord> {
-        use crate::cve::{CveFilter, search};
+    fn cve_filter(query: &str, kev_only: bool, page: usize) -> crate::cve::CveFilter {
         let q = query.trim();
-        if !q.is_empty() {
-            return search(CveFilter {
-                query: Some(q.to_string()),
-                kev_only,
-                limit: 100,
-                ..Default::default()
-            })
-            .unwrap_or_default();
-        }
-        if kev_only {
-            return search(CveFilter {
-                kev_only: true,
-                limit: 50,
-                ..Default::default()
-            })
-            .unwrap_or_default();
-        }
-        let kev = search(CveFilter {
-            kev_only: true,
-            limit: 50,
+        crate::cve::CveFilter {
+            query: if q.is_empty() {
+                None
+            } else {
+                Some(q.to_string())
+            },
+            kev_only,
+            limit: CVE_PAGE_SIZE,
+            offset: page * CVE_PAGE_SIZE,
             ..Default::default()
-        })
-        .unwrap_or_default();
-        if !kev.is_empty() {
-            return kev;
         }
-        search(CveFilter {
-            severity: Some("CRITICAL".into()),
-            since_days: Some(90),
-            limit: 50,
-            ..Default::default()
-        })
-        .unwrap_or_default()
     }
 
+    /// Fetch one page of summaries plus the total match count for the filter.
+    fn load_cve_page(query: &str, kev_only: bool, page: usize) -> (Vec<crate::cve::CveSummary>, u64) {
+        let filter = Self::cve_filter(query, kev_only, page);
+        let results = crate::cve::search_summaries(filter.clone()).unwrap_or_default();
+        let total = crate::cve::count(filter).unwrap_or(results.len() as u64);
+        (results, total)
+    }
+
+    /// Reload page 0 after the query or KEV filter changed.
     fn refresh_cve_modal_results(&mut self) {
+        let (q, kev) = match &self.modal {
+            Modal::Cve(m) => (m.query.clone(), m.kev_only),
+            _ => return,
+        };
+        let (results, total) = Self::load_cve_page(&q, kev, 0);
         if let Modal::Cve(m) = &mut self.modal {
-            let q = m.query.clone();
-            let kev = m.kev_only;
-            m.results = Self::load_cve_results(&q, kev);
-            if m.cursor >= m.results.len() {
-                m.cursor = m.results.len().saturating_sub(1);
-            }
+            m.page = 0;
+            m.results = results;
+            m.total_matches = total;
+            m.cursor = 0;
+            m.detail = false;
+            m.detail_record = None;
+            m.detail_scroll = 0;
+        }
+    }
+
+    /// Load an absolute page, clamped to the valid range. `cursor_at_end` places
+    /// the cursor on the last row (used when paging backwards past the top).
+    fn load_cve_modal_page(&mut self, page: usize, cursor_at_end: bool) {
+        let (q, kev, total_pages) = match &self.modal {
+            Modal::Cve(m) => (m.query.clone(), m.kev_only, m.total_pages()),
+            _ => return,
+        };
+        let page = page.min(total_pages.saturating_sub(1));
+        let (results, total) = Self::load_cve_page(&q, kev, page);
+        if let Modal::Cve(m) = &mut self.modal {
+            m.page = page;
+            m.cursor = if cursor_at_end {
+                results.len().saturating_sub(1)
+            } else {
+                0
+            };
+            m.results = results;
+            m.total_matches = total;
+            m.detail_scroll = 0;
+        }
+    }
+
+    /// Hydrate the full record for the selected summary and open the detail view.
+    fn open_cve_detail(&mut self) {
+        let id = match &self.modal {
+            Modal::Cve(m) => match m.results.get(m.cursor) {
+                Some(s) => s.id.clone(),
+                None => return,
+            },
+            _ => return,
+        };
+        let record = crate::cve::show(&id).ok().flatten();
+        if let Modal::Cve(m) = &mut self.modal {
+            m.detail_record = record;
+            m.detail = true;
+            m.detail_scroll = 0;
         }
     }
 
@@ -3628,6 +3711,7 @@ impl App {
                 match ke.code {
                     KeyCode::Esc => {
                         m.detail = false;
+                        m.detail_record = None;
                         m.detail_scroll = 0;
                     }
                     KeyCode::Char('j') | KeyCode::Down => {
@@ -3647,8 +3731,12 @@ impl App {
                         m.detail_scroll = m.detail_scroll.saturating_sub(page);
                     }
                     KeyCode::Char('y') => {
-                        if let Some(rec) = m.results.get(m.cursor) {
-                            let id = rec.id.clone();
+                        if let Some(id) = m
+                            .detail_record
+                            .as_ref()
+                            .map(|r| r.id.clone())
+                            .or_else(|| m.results.get(m.cursor).map(|s| s.id.clone()))
+                        {
                             match crate::clipboard::copy(&id) {
                                 Ok(()) => self.flash_ok(format!("yanked {id}")),
                                 Err(e) => self.flash_error(format!("clipboard: {e}")),
@@ -3667,29 +3755,68 @@ impl App {
                 self.needs_full_redraw = true;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if let Modal::Cve(m) = &mut self.modal {
-                    if m.cursor + 1 < m.results.len() {
-                        m.cursor += 1;
-                        m.detail_scroll = 0;
+                let advance = match &mut self.modal {
+                    Modal::Cve(m) => {
+                        if m.cursor + 1 < m.results.len() {
+                            m.cursor += 1;
+                            m.detail_scroll = 0;
+                            false
+                        } else {
+                            m.page + 1 < m.total_pages()
+                        }
                     }
+                    _ => false,
+                };
+                if advance {
+                    let next = if let Modal::Cve(m) = &self.modal { m.page + 1 } else { 0 };
+                    self.load_cve_modal_page(next, false);
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if let Modal::Cve(m) = &mut self.modal {
-                    if m.cursor > 0 {
-                        m.cursor -= 1;
-                        m.detail_scroll = 0;
+                let retreat = match &mut self.modal {
+                    Modal::Cve(m) => {
+                        if m.cursor > 0 {
+                            m.cursor -= 1;
+                            m.detail_scroll = 0;
+                            false
+                        } else {
+                            m.page > 0
+                        }
                     }
+                    _ => false,
+                };
+                if retreat {
+                    let prev = if let Modal::Cve(m) = &self.modal { m.page - 1 } else { 0 };
+                    self.load_cve_modal_page(prev, true);
                 }
             }
-            KeyCode::Enter => {
-                if let Modal::Cve(m) = &mut self.modal {
-                    if !m.results.is_empty() {
-                        m.detail = true;
-                        m.detail_scroll = 0;
-                    }
+            KeyCode::PageDown | KeyCode::Right => {
+                let next = match &self.modal {
+                    Modal::Cve(m) if m.page + 1 < m.total_pages() => Some(m.page + 1),
+                    _ => None,
+                };
+                if let Some(p) = next {
+                    self.load_cve_modal_page(p, false);
                 }
             }
+            KeyCode::PageUp | KeyCode::Left => {
+                let prev = match &self.modal {
+                    Modal::Cve(m) if m.page > 0 => Some(m.page - 1),
+                    _ => None,
+                };
+                if let Some(p) = prev {
+                    self.load_cve_modal_page(p, false);
+                }
+            }
+            KeyCode::Home => self.load_cve_modal_page(0, false),
+            KeyCode::End => {
+                let last = match &self.modal {
+                    Modal::Cve(m) => m.total_pages().saturating_sub(1),
+                    _ => 0,
+                };
+                self.load_cve_modal_page(last, false);
+            }
+            KeyCode::Enter => self.open_cve_detail(),
             KeyCode::Char('y') => {
                 if let Modal::Cve(m) = &self.modal {
                     if let Some(rec) = m.results.get(m.cursor) {

@@ -203,6 +203,18 @@ pub fn search(filter: CveFilter) -> Result<Vec<CveRecord>> {
     store.search(&filter)
 }
 
+pub fn search_summaries(filter: CveFilter) -> Result<Vec<crate::cve::model::CveSummary>> {
+    ensure_cve_dirs()?;
+    let store = CveStore::open()?;
+    store.search_summaries(&filter)
+}
+
+pub fn count(filter: CveFilter) -> Result<u64> {
+    ensure_cve_dirs()?;
+    let store = CveStore::open()?;
+    store.count(&filter)
+}
+
 pub fn show(cve_id: &str) -> Result<Option<CveRecord>> {
     let id = crate::cve::model::normalize_cve_id(cve_id)
         .ok_or_else(|| anyhow::anyhow!("invalid CVE id: {cve_id}"))?;

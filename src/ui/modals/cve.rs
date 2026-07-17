@@ -22,7 +22,7 @@ fn detail_line_count(modal: &CveModal) -> usize {
 }
 
 fn build_detail_lines(modal: &CveModal) -> Vec<Line<'static>> {
-    let rec = match modal.results.get(modal.cursor) {
+    let rec = match modal.detail_record.as_ref() {
         Some(r) => r,
         None => return vec![Line::from("No selection")],
     };
@@ -159,10 +159,21 @@ pub fn render(
         layout[1],
     );
 
+    let total_pages = modal.total_pages();
+    let page_start = if modal.results.is_empty() {
+        0
+    } else {
+        modal.page * modal.page_size + 1
+    };
+    let page_end = modal.page * modal.page_size + modal.results.len();
     let chips = format!(
-        "{}  {} shown  j/k/wheel move  Enter detail  y yank  s sync  K KEV{}  Esc close",
+        "{}  {}-{} of {}  page {}/{}  j/k move  ←/→ PgUp/PgDn page  Enter detail  y yank  s sync  K KEV{}  Esc close",
         if modal.kev_only { "[KEV]" } else { "[all]" },
-        modal.results.len(),
+        page_start,
+        page_end,
+        modal.total_matches,
+        modal.page + 1,
+        total_pages,
         if modal.kev_only { "✓" } else { "" },
     );
     f.render_widget(
@@ -203,8 +214,10 @@ pub fn render(
         list_offset: state.offset(),
     });
 
-    let hint = if modal.results.is_empty() {
-        "No matches — run :cve then press s to sync, or type to search"
+    let hint = if modal.db_total == 0 {
+        "Empty index — press s to sync from NVD/KEV"
+    } else if modal.results.is_empty() {
+        "No matches for this filter — clear query or toggle KEV"
     } else {
         ""
     };

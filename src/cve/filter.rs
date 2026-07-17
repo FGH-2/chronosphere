@@ -1,8 +1,12 @@
 use crate::cve::model::CveFilter;
 use rusqlite::types::Value;
 
-/// Build SQL for CVE search combining FTS and structured filters.
-pub fn build_search_query(filter: &CveFilter) -> (String, Vec<Value>) {
+const ORDER_BY: &str = "ORDER BY c.modified DESC NULLS LAST, c.id DESC";
+
+/// Build the shared `WHERE` clause (with `c.` column prefixes) and its bound
+/// parameters. Reused by the id, summary and count query builders so every
+/// path filters identically.
+fn build_where(filter: &CveFilter) -> (String, Vec<Value>) {
     let mut params: Vec<Value> = Vec::new();
     let mut where_clauses: Vec<String> = Vec::new();
 
@@ -88,10 +92,39 @@ pub fn build_search_query(filter: &CveFilter) -> (String, Vec<Value>) {
         format!("WHERE {}", where_clauses.join(" AND "))
     };
 
-    let limit = filter.limit.max(1).min(500);
+    (where_sql, params)
+}
+
+fn page_bounds(filter: &CveFilter) -> (usize, usize) {
+    (filter.limit.max(1).min(500), filter.offset)
+}
+
+/// Build SQL that returns only matching CVE ids for a page.
+pub fn build_search_query(filter: &CveFilter) -> (String, Vec<Value>) {
+    let (where_sql, params) = build_where(filter);
+    let (limit, offset) = page_bounds(filter);
+    let sql =
+        format!("SELECT c.id FROM cves c {where_sql} {ORDER_BY} LIMIT {limit} OFFSET {offset}");
+    (sql, params)
+}
+
+/// Build SQL that returns the columns needed for the list/browse view in a
+/// single query, skipping the child-table joins used by the detail view.
+pub fn build_summary_query(filter: &CveFilter) -> (String, Vec<Value>) {
+    let (where_sql, params) = build_where(filter);
+    let (limit, offset) = page_bounds(filter);
     let sql = format!(
-        "SELECT c.id FROM cves c {where_sql} ORDER BY c.modified DESC NULLS LAST, c.id DESC LIMIT {limit}"
+        "SELECT c.id, c.severity, c.cvss_v31, c.in_kev, c.description \
+         FROM cves c {where_sql} {ORDER_BY} LIMIT {limit} OFFSET {offset}"
     );
+    (sql, params)
+}
+
+/// Build SQL that counts all rows matching the filter (ignores limit/offset),
+/// used to drive pagination totals.
+pub fn build_count_query(filter: &CveFilter) -> (String, Vec<Value>) {
+    let (where_sql, params) = build_where(filter);
+    let sql = format!("SELECT COUNT(*) FROM cves c {where_sql}");
     (sql, params)
 }
 
@@ -108,5 +141,32 @@ mod tests {
         };
         let (sql, _) = build_search_query(&f);
         assert!(sql.contains("in_kev = 1"));
+    }
+
+    #[test]
+    fn summary_query_includes_offset() {
+        let f = CveFilter {
+            limit: 50,
+            offset: 150,
+            ..Default::default()
+        };
+        let (sql, _) = build_summary_query(&f);
+        assert!(sql.contains("LIMIT 50 OFFSET 150"));
+        assert!(sql.contains("c.description"));
+    }
+
+    #[test]
+    fn count_query_ignores_limit() {
+        let f = CveFilter {
+            kev_only: true,
+            limit: 10,
+            offset: 20,
+            ..Default::default()
+        };
+        let (sql, _) = build_count_query(&f);
+        assert!(sql.contains("COUNT(*)"));
+        assert!(sql.contains("in_kev = 1"));
+        assert!(!sql.contains("LIMIT"));
+        assert!(!sql.contains("OFFSET"));
     }
 }

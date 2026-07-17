@@ -51,6 +51,19 @@ pub struct CveFilter {
     pub since_days: Option<u32>,
     pub tag: Option<String>,
     pub limit: usize,
+    /// Number of matching rows to skip before the current page.
+    pub offset: usize,
+}
+
+/// Lightweight row used for list/browse views. Avoids hydrating product,
+/// CWE, reference and alias child tables which the list never displays.
+#[derive(Debug, Clone, Default)]
+pub struct CveSummary {
+    pub id: String,
+    pub severity: Option<String>,
+    pub cvss_v31: Option<f64>,
+    pub in_kev: bool,
+    pub description: String,
 }
 
 impl CveFilter {
