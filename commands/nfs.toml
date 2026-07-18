@@ -11,22 +11,58 @@ requires = ["showmount"]
 tags = ["enum", "exports"]
 
 [[command]]
+id = "nfs.rpcinfo"
+title = "rpcinfo -p"
+template = "rpcinfo -p {target}"
+requires = ["rpcinfo"]
+tags = ["enum", "rpc"]
+
+[[command]]
 id = "nfs.mount"
-title = "mount NFS export"
+title = "mount NFS export (generic)"
 template = "sudo mkdir -p /mnt/nfs && sudo mount -t nfs {target}:/EXPORT /mnt/nfs -o nolock"
 requires = ["mount"]
 tags = ["mount"]
 
 [[command]]
+id = "nfs.mount.ro"
+title = "mount NFS export read-only (v3)"
+template = "sudo mkdir -p loot/nfs && sudo mount -t nfs -o ro,nolock,vers=3 {target}:/EXPORT loot/nfs && ls -la loot/nfs"
+requires = ["mount"]
+tags = ["mount", "loot"]
+
+[[command]]
+id = "nfs.mount.rw_test"
+title = "try RW mount (expect fail if server is ro)"
+template = "sudo mkdir -p /mnt/nfs_rw && sudo mount -t nfs -o rw,nolock,vers=3 {target}:/EXPORT /mnt/nfs_rw; touch /mnt/nfs_rw/.writetest 2>&1 | tee loot/nfs-write-test.txt; ls -la /mnt/nfs_rw; sudo umount /mnt/nfs_rw 2>/dev/null || true"
+requires = ["mount"]
+tags = ["mount", "misconfig"]
+
+[[command]]
 id = "nfs.umount"
 title = "unmount"
-template = "sudo umount /mnt/nfs"
+template = "sudo umount loot/nfs 2>/dev/null; sudo umount /mnt/nfs 2>/dev/null; true"
 requires = ["umount"]
 tags = ["mount"]
 
 [[command]]
 id = "nfs.nmap.script"
 title = "nmap nfs-ls / nfs-showmount"
-template = "nmap -p 111,2049 --script=nfs-ls,nfs-showmount,nfs-statfs {target}"
+template = "nmap -p 111,2049 --script=nfs-ls,nfs-showmount,nfs-statfs {target} -oA scans/nfs"
 requires = ["nmap"]
 tags = ["enum"]
+
+[[command]]
+id = "nfs.loot.pdf"
+title = "extract text from mounted PDFs"
+template = "find loot/nfs /mnt/nfs -type f \\( -iname '*.pdf' -o -iname '*.txt' -o -iname '*.md' \\) 2>/dev/null | while read -r f; do echo \"==== $f\"; pdftotext \"$f\" - 2>/dev/null || strings \"$f\" | head -80; done | tee loot/nfs-loot.txt"
+requires = []
+tags = ["loot"]
+
+[[command]]
+id = "nfs.export_opts_hint"
+title = "remind: check ro vs rw / root_squash"
+template = "echo 'After mount, note: world *(ro) = cred drip; look for rw,no_root_squash for privesc. exportfs -v on target if you have shell.'"
+requires = []
+tags = ["misconfig", "hint"]
+execution = "any"

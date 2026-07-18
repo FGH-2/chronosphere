@@ -1,0 +1,58 @@
+category = "olivetin"
+display_name = "OliveTin"
+icon = ""
+order = 83
+
+# Localhost admin helper UI — typically after foothold / SSH. Set target=127.0.0.1
+# (or tunnel AP). Guests may be able to exec when authRequireGuestsToLogin=false.
+# Weaponized action templates stay in the private command overlay (chrono-pocs).
+
+[[command]]
+id = "olivetin.probe"
+title = "probe OliveTin HTTP root"
+template = "curl -sS --max-time 5 -D- http://{target}:1337/ -o /tmp/olivetin.html; head -c 400 /tmp/olivetin.html; echo"
+requires = ["curl"]
+tags = ["enum"]
+
+[[command]]
+id = "olivetin.init"
+title = "POST /api/Init (guest context)"
+template = "curl -sS --max-time 5 -X POST http://{target}:1337/api/Init -H 'Content-Type: application/json' -d '{}'"
+requires = ["curl"]
+tags = ["enum", "api"]
+
+[[command]]
+id = "olivetin.whoami"
+title = "POST /api/WhoAmI"
+template = "curl -sS --max-time 5 -X POST http://{target}:1337/api/WhoAmI -H 'Content-Type: application/json' -d '{}'"
+requires = ["curl"]
+tags = ["enum", "api"]
+
+[[command]]
+id = "olivetin.dashboard"
+title = "POST /api/GetDashboard"
+template = "curl -sS --max-time 10 -X POST http://{target}:1337/api/GetDashboard -H 'Content-Type: application/json' -d '{}' | tee loot/olivetin-dashboard.json"
+requires = ["curl"]
+tags = ["enum", "api"]
+
+[[command]]
+id = "olivetin.logs"
+title = "POST /api/GetLogs"
+template = "curl -sS --max-time 10 -X POST http://{target}:1337/api/GetLogs -H 'Content-Type: application/json' -d '{}' | tee loot/olivetin-logs.json"
+requires = ["curl"]
+tags = ["enum", "api"]
+
+[[command]]
+id = "olivetin.start_and_wait"
+title = "StartActionAndWait by actionId (example: date)"
+template = "curl -sS --max-time 30 -X POST http://{target}:1337/api/StartActionAndWait -H 'Content-Type: application/json' -d '{\"actionId\":\"date\"}'"
+requires = ["curl"]
+tags = ["exec", "api"]
+
+[[command]]
+id = "olivetin.port_check"
+title = "ss/curl reachability as current uid"
+template = "ss -lntp | grep -E ':1337\\b' || netstat -lntp 2>/dev/null | grep 1337; curl -sS --max-time 3 -o /dev/null -w 'http=%{http_code}\\n' http://127.0.0.1:1337/ || echo unreachable"
+requires = ["curl"]
+tags = ["enum", "local"]
+execution = "any"

@@ -1,0 +1,152 @@
+category = "mail"
+display_name = "Mail (IMAP/POP/SMTP)"
+icon = ""
+order = 74
+
+# --- Banner / capability enum ---
+
+[[command]]
+id = "mail.nmap.scripts"
+title = "nmap IMAP/POP/SMTP scripts"
+template = "nmap -Pn -sV -p 25,110,143,465,587,993,995 --script=banner,imap-capabilities,imap-ntlm-info,pop3-capabilities,pop3-ntlm-info,smtp-commands,smtp-enum-users,ssl-cert {target} -oA scans/mail"
+requires = ["nmap"]
+tags = ["enum", "nmap"]
+
+[[command]]
+id = "mail.openssl.imap_banner"
+title = "openssl IMAPS banner (993)"
+template = "echo | openssl s_client -connect {target}:993 -quiet 2>/dev/null | head -20"
+requires = ["openssl"]
+tags = ["enum", "imap", "ssl"]
+
+[[command]]
+id = "mail.openssl.pop_banner"
+title = "openssl POP3S banner (995)"
+template = "echo | openssl s_client -connect {target}:995 -quiet 2>/dev/null | head -20"
+requires = ["openssl"]
+tags = ["enum", "pop3", "ssl"]
+
+[[command]]
+id = "mail.nc.imap_clear"
+title = "nc IMAP cleartext CAPABILITY (143)"
+template = "(echo -e 'a001 CAPABILITY\\r\\na002 LOGOUT\\r'; sleep 1) | nc -w 5 {target} 143"
+requires = ["nc"]
+tags = ["enum", "imap"]
+
+[[command]]
+id = "mail.nc.pop_clear"
+title = "nc POP3 cleartext CAPA (110)"
+template = "(echo -e 'CAPA\\r\\nQUIT\\r'; sleep 1) | nc -w 5 {target} 110"
+requires = ["nc"]
+tags = ["enum", "pop3"]
+
+[[command]]
+id = "mail.nc.smtp_banner"
+title = "nc SMTP banner/EHLO (25)"
+template = "(echo -e 'EHLO test\\r\\nQUIT\\r'; sleep 1) | nc -w 5 {target} 25"
+requires = ["nc"]
+tags = ["enum", "smtp"]
+
+# --- Auth / login tests ---
+
+[[command]]
+id = "mail.imap.login_test"
+title = "IMAP LOGIN over SSL (openssl)"
+template = """(echo -e \"a001 LOGIN {user} {password}\\r\\na002 LIST \\\"\\\" *\\r\\na003 LOGOUT\\r\"; sleep 2) \\
+ | openssl s_client -connect {target}:993 -quiet 2>/dev/null | tee loot/mail-imap-{user}.txt"""
+requires = ["openssl"]
+tags = ["auth", "imap"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mail.imap.login_curl"
+title = "curl IMAPS LIST (auth)"
+template = "curl -sk --url 'imaps://{target}/' --user '{user}:{password}' -X 'LIST \"\" *'"
+requires = ["curl"]
+tags = ["auth", "imap"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mail.pop.login_test"
+title = "POP3S USER/PASS (openssl)"
+template = """(echo -e \"USER {user}\\r\\nPASS {password}\\r\\nSTAT\\r\\nLIST\\r\\nQUIT\\r\"; sleep 2) \\
+ | openssl s_client -connect {target}:995 -quiet 2>/dev/null | tee loot/mail-pop-{user}.txt"""
+requires = ["openssl"]
+tags = ["auth", "pop3"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mail.pop.login_curl"
+title = "curl POP3S LIST (auth)"
+template = "curl -sk --url 'pop3s://{target}/' --user '{user}:{password}'"
+requires = ["curl"]
+tags = ["auth", "pop3"]
+when = "creds.kind == 'plaintext'"
+
+# --- Dump mail ---
+
+[[command]]
+id = "mail.imap.fetch_inbox"
+title = "IMAP FETCH INBOX headers+bodies (openssl)"
+template = """(echo -e \"a001 LOGIN {user} {password}\\r\\na002 SELECT INBOX\\r\\na003 FETCH 1:* (BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)] BODY.PEEK[TEXT])\\r\\na004 LOGOUT\\r\"; sleep 3) \\
+ | openssl s_client -connect {target}:993 -quiet 2>/dev/null | tee loot/mail-imap-inbox-{user}.txt"""
+requires = ["openssl"]
+tags = ["loot", "imap"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mail.imap.fetch_curl"
+title = "curl IMAPS fetch message 1"
+template = "curl -sk --url 'imaps://{target}/INBOX/;UID=1' --user '{user}:{password}' -o loot/mail-uid1-{user}.eml"
+requires = ["curl"]
+tags = ["loot", "imap"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mail.pop.retr_all"
+title = "POP3S RETR all (openssl)"
+template = """(echo -e \"USER {user}\\r\\nPASS {password}\\r\\nSTAT\\r\\nLIST\\r\\nRETR 1\\r\\nQUIT\\r\"; sleep 3) \\
+ | openssl s_client -connect {target}:995 -quiet 2>/dev/null | tee loot/mail-pop-retr-{user}.txt"""
+requires = ["openssl"]
+tags = ["loot", "pop3"]
+when = "creds.kind == 'plaintext'"
+
+# --- Brute / spray (noisy) ---
+
+[[command]]
+id = "mail.hydra.imap"
+title = "hydra IMAPS brute"
+template = "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt -t 4 -f {target} imap -s 993 -S"
+requires = ["hydra"]
+tags = ["brute", "noisy", "imap"]
+
+[[command]]
+id = "mail.hydra.pop"
+title = "hydra POP3S brute"
+template = "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt -t 4 -f {target} pop3 -s 995 -S"
+requires = ["hydra"]
+tags = ["brute", "noisy", "pop3"]
+
+[[command]]
+id = "mail.hydra.smtp"
+title = "hydra SMTP brute"
+template = "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt -t 4 -f smtp://{target}"
+requires = ["hydra"]
+tags = ["brute", "noisy", "smtp"]
+
+# --- SMTP helpers ---
+
+[[command]]
+id = "mail.swaks.send_local"
+title = "swaks send (auth SMTP)"
+template = "swaks --to TARGET@example.com --from '{user}' --server {target} --port 587 --auth LOGIN --auth-user '{user}' --auth-password '{password}' --body 'test' --tls"
+requires = ["swaks"]
+tags = ["smtp", "send"]
+when = "creds.kind == 'plaintext'"
+
+[[command]]
+id = "mail.swaks.ehlo"
+title = "swaks probe SMTP"
+template = "swaks --server {target} --port 25 --quit-after BANNER"
+requires = ["swaks"]
+tags = ["enum", "smtp"]
